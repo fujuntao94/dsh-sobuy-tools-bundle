@@ -1,0 +1,46 @@
+{
+  "name": "dsh-sobuy-tools-bundle",
+  "version": "0.1.5",
+  "description": "Sobuy DSH 工具组件包：飞书工具与数据查询。",
+  "type": "module",
+  "files": [
+    "index.js",
+    "client.js",
+    "cordis.patch.yml",
+    "README.md",
+    "locale/*.json",
+    "components/"
+  ],
+  "scripts": {
+    "test": "node --test components/feishu/test/oauth.test.js && node --check components/database/index.js",
+    "check": "node --check client.js && cd components/feishu && node scripts/check-syntax.js && node --check ../database/index.js"
+  },
+  "dependencies": {
+    "axios": "1.20.0"
+  },
+  "main": "index.js",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./feishu": "./components/feishu/index.js",
+    "./database": "./components/database/index.js",
+    "./package.json": "./package.json",
+    "./locale/*.json": "./locale/*.json"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "inject": [
+        "slots",
+        "locale"
+      ],
+      "platform": "web"
+    }
+  },
+  "devDependencies": {},
+  "keywords": [],
+  "author": "",
+  "license": "ISC"
+}

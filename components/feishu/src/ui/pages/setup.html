@@ -1,0 +1,81 @@
+<!doctype html><!-- 浏览器设置页模板 -->
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>设置飞书授权</title>
+    <style>
+      :root { color-scheme: light; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+      * { box-sizing: border-box; }
+      body { min-height: 100vh; margin: 0; display: grid; place-items: center; padding: 28px 16px; color: #172033; background: linear-gradient(145deg, #edf4ff, #f8fbff 45%, #eef8ff); }
+      main { width: min(100%, 520px); overflow: hidden; border: 1px solid #dce6f7; border-radius: 20px; background: #fff; box-shadow: 0 20px 55px rgba(34, 74, 135, .16); }
+      header { padding: 30px 32px 26px; color: #fff; background: linear-gradient(135deg, #4a8dff, #2864e7); }
+      .logo { display: grid; place-items: center; width: 42px; height: 42px; margin-bottom: 16px; border-radius: 12px; background: rgba(255,255,255,.18); font-size: 22px; font-weight: 700; }
+      h1 { margin: 0 0 8px; font-size: 23px; } header p { margin: 0; line-height: 1.65; color: rgba(255,255,255,.84); font-size: 14px; }
+      form { padding: 24px 32px 30px; } label { display: block; margin: 0 0 8px; color: #283449; font-size: 14px; font-weight: 650; }
+      input { width: 100%; height: 46px; padding: 0 13px; border: 1px solid #ccd9ef; border-radius: 10px; outline: none; color: #172033; font: inherit; }
+      input:focus { border-color: #3370ff; box-shadow: 0 0 0 3px rgba(51,112,255,.15); } .field { margin-top: 20px; }
+      .hint { margin: 8px 0 0; color: #718096; font-size: 12px; line-height: 1.6; }
+      .status, .notice { margin: 20px 32px 0; padding: 12px 13px; border: 1px solid #cfe0ff; border-radius: 10px; background: #f3f7ff; color: #52627a; font-size: 13px; line-height: 1.55; }
+      .status strong { display: block; margin-bottom: 3px; color: #263a59; } .status.success { border-color: #a9e6c4; background: #effcf5; } .status.success strong { color: #16794a; }
+      .notice { border-color: #fecdca; color: #b42318; background: #fff1f0; } .notice[hidden] { display: none; }
+      button { width: 100%; height: 48px; margin-top: 26px; border: 0; border-radius: 10px; color: #fff; background: linear-gradient(135deg, #4c8dff, #2864e7); box-shadow: 0 8px 18px rgba(51,112,255,.25); cursor: pointer; font: 600 15px inherit; }
+      button:hover { filter: brightness(1.04); } footer { padding: 0 32px 26px; color: #718096; font-size: 12px; line-height: 1.65; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header><div class="logo">飞</div><h1>设置飞书授权</h1><p>凭据只提交给本机插件服务，保存后会直接打开飞书官方授权页。</p></header>
+      <div class="status" id="status"><strong id="status-title">正在读取已保存状态…</strong><span id="status-detail">请稍候。</span></div>
+      <p class="notice" {{noticeHidden}}>{{message}}</p>
+      <form method="post" action="{{setupPath}}">
+        <input type="hidden" name="setup_token" value="{{setupToken}}">
+        <label for="app-id">App ID</label>
+        <input id="app-id" name="app_id" required autocomplete="off" placeholder="请输入飞书应用 App ID">
+        <div class="field"><label for="app-secret">App Secret</label><input id="app-secret" name="app_secret" type="password" autocomplete="new-password" placeholder="请输入飞书应用 App Secret"><p class="hint" id="secret-hint">请从飞书开放平台复制应用密钥。</p></div>
+        <button type="submit" id="submit-button">保存并前往飞书授权</button>
+      </form>
+      <footer>请勿将 App Secret 发送到聊天或提交到代码仓库。</footer>
+    </main>
+    <script>
+      // 状态只从本机插件服务读取；响应中不包含 App Secret、access token 或 refresh token。
+      const statusBox = document.getElementById('status')
+      const statusTitle = document.getElementById('status-title')
+      const statusDetail = document.getElementById('status-detail')
+      const appId = document.getElementById('app-id')
+      const appSecret = document.getElementById('app-secret')
+      const secretHint = document.getElementById('secret-hint')
+      const submitButton = document.getElementById('submit-button')
+
+      fetch('{{statusPath}}', { cache: 'no-store' }).then(response => {
+        if (!response.ok) throw new Error('status request failed')
+        return response.json()
+      }).then(status => {
+        appId.value = status.appId || ''
+        const configured = Boolean(status.appSecretConfigured)
+        const loggedIn = Boolean(status.loggedIn)
+        if (loggedIn) {
+          statusBox.classList.add('success')
+          statusTitle.textContent = `已授权：${status.user?.name || '飞书用户'}`
+          statusDetail.textContent = '当前账号可以调用已授权的飞书接口。'
+          submitButton.textContent = '重新授权飞书'
+        } else if (configured) {
+          statusTitle.textContent = '应用凭据已保存'
+          statusDetail.textContent = status.authorizationState === 'error' && status.authorizationError
+            ? `上次授权失败：${status.authorizationError}` : '尚未完成飞书授权，可继续前往飞书授权。'
+          submitButton.textContent = '前往飞书授权'
+        } else {
+          statusTitle.textContent = '尚未配置飞书应用'
+          statusDetail.textContent = '请填写 App ID 和 App Secret 后保存。'
+        }
+        if (configured) {
+          appSecret.placeholder = '已安全保存；留空表示不修改'
+          secretHint.textContent = '如不更换密钥，可留空。'
+        }
+      }).catch(() => {
+        statusTitle.textContent = '无法读取已保存状态'
+        statusDetail.textContent = '请确认 DeepSeek 飞书插件正在运行后刷新页面。'
+      })
+    </script>
+  </body>
+</html>

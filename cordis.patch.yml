@@ -1,0 +1,19 @@
+- insert:
+    # 一个 Sobuy 工具包内聚合独立组件；每个组件仍可在 Desktop 中单独启停。
+    # client 模块必须挂在裸包名 row；子路径 row 不会向 Desktop 提供设置页。
+    - id: sobuy-tools-client
+      name: dsh-sobuy-tools-bundle
+    - id: sobuy-feishu-tools
+      name: dsh-sobuy-tools-bundle/feishu
+      config:
+        callbackHost: 127.0.0.1
+        callbackPort: 18080
+        callbackPath: /feishu/callback
+        setupPath: /feishu/setup
+        statusPath: /feishu/status
+        oauthScope: offline_access contact:user.base:readonly contact:user.department:readonly contact:department.base:readonly
+        setupPort: 18081
+        authorizationTimeoutMs: 300000
+    - id: sobuy-database-tools
+      name: dsh-sobuy-tools-bundle/database
+      config: {}

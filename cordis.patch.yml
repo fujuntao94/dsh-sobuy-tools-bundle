@@ -1,10 +1,8 @@
 - insert:
     # 一个 Sobuy 工具包内聚合独立组件；每个组件仍可在 Desktop 中单独启停。
-    # client 模块必须挂在裸包名 row；子路径 row 不会向 Desktop 提供设置页。
-    - id: sobuy-tools-client
-      name: dsh-sobuy-tools-bundle
+    # 根组件同时加载飞书能力与 client 设置页，避免目录中出现单独的 client 组件。
     - id: sobuy-feishu-tools
-      name: dsh-sobuy-tools-bundle/feishu
+      name: dsh-sobuy-tools-bundle
       config:
         callbackHost: 127.0.0.1
         callbackPort: 18080

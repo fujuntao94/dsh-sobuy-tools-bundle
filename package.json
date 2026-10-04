@@ -1,6 +1,6 @@
 {
   "name": "dsh-sobuy-tools-bundle",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "description": "Sobuy DSH 工具组件包：飞书工具与数据查询。",
   "type": "module",
   "files": [
@@ -22,7 +22,6 @@
   "exports": {
     ".": "./index.js",
     "./client": "./client.js",
-    "./feishu": "./components/feishu/index.js",
     "./database": "./components/database/index.js",
     "./package.json": "./package.json",
     "./locale/*.json": "./locale/*.json"

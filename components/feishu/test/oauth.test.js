@@ -3,11 +3,13 @@ import test from 'node:test'
 // strict 断言保证 URL 编码和令牌字段映射不被后续重构悄悄改变。
 import assert from 'node:assert/strict'
 import { mkdtemp, rm, stat } from 'node:fs/promises'
+import { createServer } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 // 只测试不需要真实飞书凭据的纯函数，避免单测访问网络或泄露令牌。
 import { hasApplicationCredentials, publicStatus, registerLoginTool } from '../src/runtime/tools/login-tool.js'
-import { getValidUserToken } from '../src/domains/auth/user-token.js'
+import { getValidUserToken, refreshStoredUserToken } from '../src/domains/auth/user-token.js'
+import { logout } from '../src/domains/auth/logout.js'
 import { registerUserInfoTool } from '../src/runtime/tools/user-info-tool.js'
 import { registerDepartmentTool } from '../src/runtime/tools/department-tool.js'
 import { getMyDepartments } from '../src/domains/organization/department-api.js'
@@ -31,8 +33,10 @@ import {
   buildAuthorizeUrl,
   callbackHtml,
   completeAuthorizationCode,
+  createAuthorizationFlow,
   exchangeAuthorizationCode,
   getUserInfo,
+  localOrigin,
   normalizeToken,
   refreshAccessToken,
   REVOKE_URL,
@@ -43,6 +47,17 @@ import { authorizationStatusPath, configPath, readJson, tokenPath, writePrivateJ
 import { readFile } from 'node:fs/promises'
 import packageJson from '../../../package.json' with { type: 'json' }
 
+async function availablePort(host = '127.0.0.1') {
+  const server = createServer()
+  await new Promise((resolve, reject) => {
+    server.once('error', reject)
+    server.listen({ host, port: 0, exclusive: true }, resolve)
+  })
+  const { port } = server.address()
+  await new Promise((resolve, reject) => server.close(error => error ? reject(error) : resolve()))
+  return port
+}
+
 test('OAuth v2 授权链接会编码回调地址、范围并保留 state', () => {
   // 模拟实际 OAuth 参数；这里只验证 URL 结构，不会打开浏览器。
   const url = new URL(buildAuthorizeUrl({ appId: 'cli_test', redirectUri: 'http://127.0.0.1:18080/feishu/callback', state: 'safe-state' }))
@@ -51,6 +66,49 @@ test('OAuth v2 授权链接会编码回调地址、范围并保留 state', () =>
   assert.equal(url.searchParams.get('scope'), 'offline_access contact:user.base:readonly')
   assert.equal(url.searchParams.get('redirect_uri'), 'http://127.0.0.1:18080/feishu/callback')
   assert.equal(url.searchParams.get('state'), 'safe-state')
+})
+
+test('IPv6 回环地址使用合法的方括号 URL', () => {
+  assert.equal(localOrigin('::1', 18080), 'http://[::1]:18080')
+  assert.doesNotThrow(() => new URL('/feishu/callback', localOrigin('::1', 18080)))
+})
+
+test('OAuth 回调端口监听成功后才进入可授权状态', async () => {
+  const blocker = createServer()
+  await new Promise((resolve, reject) => {
+    blocker.once('error', reject)
+    blocker.listen({ host: '127.0.0.1', port: 0, exclusive: true }, resolve)
+  })
+  const { port } = blocker.address()
+  try {
+    const flow = createAuthorizationFlow({
+      appId: 'cli_test', redirectUri: `http://127.0.0.1:${port}/feishu/callback`,
+      host: '127.0.0.1', port, path: '/feishu/callback', timeoutMs: 1000,
+    })
+    const completedFailure = assert.rejects(flow.completed, /无法启动本机授权回调服务/)
+    await assert.rejects(flow.ready, /无法启动本机授权回调服务/)
+    await completedFailure
+  } finally {
+    await new Promise(resolve => blocker.close(resolve))
+  }
+})
+
+test('错误 state 只拒绝当前请求，正确回调仍可完成授权', async () => {
+  const port = await availablePort()
+  const flow = createAuthorizationFlow({
+    appId: 'cli_test', redirectUri: `http://127.0.0.1:${port}/feishu/callback`,
+    host: '127.0.0.1', port, path: '/feishu/callback', timeoutMs: 2000,
+    onAuthorizationCode: async code => ({ code }),
+  })
+  await flow.ready
+  const state = new URL(flow.authorizationUrl).searchParams.get('state')
+
+  const rejected = await fetch(`http://127.0.0.1:${port}/feishu/callback?code=wrong&state=stale-state`)
+  assert.equal(rejected.status, 400)
+
+  const accepted = await fetch(`http://127.0.0.1:${port}/feishu/callback?code=valid-code&state=${encodeURIComponent(state)}`)
+  assert.equal(accepted.status, 200)
+  assert.deepEqual(await flow.completed, { code: 'valid-code' })
 })
 
 test('撤销令牌走飞书 OAuth 账户域名', () => {
@@ -168,6 +226,55 @@ test('个人信息工具复用未过期的用户 token，不重复刷新', async
     const active = await getValidUserToken({ dataDirectory: folder })
     assert.equal(active.refreshed, false)
     assert.equal(active.token.accessToken, 'access-only')
+  } finally {
+    await rm(folder, { recursive: true, force: true })
+  }
+})
+
+test('刷新期间切换应用会丢弃旧 token，不覆盖新登录态', async () => {
+  const folder = await mkdtemp(join(tmpdir(), 'dsh-feishu-refresh-race-'))
+  try {
+    await writePrivateJson(configPath(folder), { appId: 'cli_old', appSecret: 'old-secret' })
+    await writePrivateJson(tokenPath(folder), { accessToken: 'old-access', refreshToken: 'old-refresh', expiresAt: Date.now() - 1000 })
+    let releaseRefresh
+    const refreshGate = new Promise(resolve => { releaseRefresh = resolve })
+    const client = {
+      accessToken: { refresh: async () => {
+        await refreshGate
+        return { accessToken: 'stale-access', refreshToken: 'stale-refresh', expiresIn: 7200 }
+      } },
+      authen: { v1: { userInfo: { get: async () => ({ code: 0, data: { open_id: 'ou_old', name: '旧用户' } }) } } },
+    }
+    const refreshing = refreshStoredUserToken({ dataDirectory: folder, oauthClient: client })
+    await new Promise(resolve => setTimeout(resolve, 0))
+    await writePrivateJson(configPath(folder), { appId: 'cli_new', appSecret: 'new-secret' })
+    await writePrivateJson(tokenPath(folder), { accessToken: 'new-access', refreshToken: 'new-refresh', expiresAt: Date.now() + 7200000 })
+    releaseRefresh()
+
+    await assert.rejects(refreshing, /登录状态已变化/)
+    assert.equal((await readJson(tokenPath(folder))).accessToken, 'new-access')
+  } finally {
+    await rm(folder, { recursive: true, force: true })
+  }
+})
+
+test('退出撤销期间重新登录时不会删除新 token', async () => {
+  const folder = await mkdtemp(join(tmpdir(), 'dsh-feishu-logout-race-'))
+  try {
+    await writePrivateJson(configPath(folder), { appId: 'cli_test', appSecret: 'test-secret' })
+    await writePrivateJson(tokenPath(folder), { accessToken: 'old-access', refreshToken: 'old-refresh' })
+    let releaseRevoke
+    const revokeGate = new Promise(resolve => { releaseRevoke = resolve })
+    const loggingOut = logout({
+      dataDirectory: folder,
+      revokeOAuthTokenImpl: async () => revokeGate,
+    })
+    await new Promise(resolve => setTimeout(resolve, 0))
+    await writePrivateJson(tokenPath(folder), { accessToken: 'new-access', refreshToken: 'new-refresh' })
+    releaseRevoke()
+
+    await loggingOut
+    assert.equal((await readJson(tokenPath(folder))).accessToken, 'new-access')
   } finally {
     await rm(folder, { recursive: true, force: true })
   }
@@ -306,6 +413,40 @@ test('飞书认证 Service 合并并发的用户 token 加载，避免重复刷�
   }
 })
 
+test('清除身份缓存会废弃在途旧请求，且不会清掉新一代请求', async () => {
+  const folder = await mkdtemp(join(tmpdir(), 'dsh-feishu-auth-generation-'))
+  try {
+    await writePrivateJson(configPath(folder), { appId: 'cli_test', appSecret: 'test-secret' })
+    let calls = 0
+    let releaseOld
+    const oldGate = new Promise(resolve => { releaseOld = resolve })
+    const service = createFeishuAuthService({
+      dataDirectory: folder,
+      getValidUserTokenImpl: async () => {
+        calls += 1
+        if (calls === 1) {
+          await oldGate
+          return { token: { accessToken: 'old-access', expiresAt: Date.now() + 600000, user: { openId: 'ou_old' } }, refreshed: false }
+        }
+        return { token: { accessToken: 'new-access', expiresAt: Date.now() + 600000, user: { openId: 'ou_new' } }, refreshed: false }
+      },
+    })
+
+    const oldRequest = service.getActiveUser()
+    await new Promise(resolve => setTimeout(resolve, 0))
+    service.clearCurrentUserCache()
+    const newRequest = service.getActiveUser()
+    releaseOld()
+
+    await assert.rejects(oldRequest, /登录状态已变化/)
+    assert.equal((await newRequest).token.accessToken, 'new-access')
+    assert.equal((await service.getActiveUser()).token.accessToken, 'new-access')
+    assert.equal(calls, 2)
+  } finally {
+    await rm(folder, { recursive: true, force: true })
+  }
+})
+
 test('取消一个等待中的 Tool 不会取消共享的用户 token 刷新', async () => {
   const folder = await mkdtemp(join(tmpdir(), 'dsh-feishu-auth-cancel-'))
   try {
@@ -384,18 +525,24 @@ test('飞书响应缺少预期对象时会明确报结构异常，而不是静�
 
 test('假期余额只从分页结果中返回当前 OAuth 用户对应的记录', async () => {
   const requests = []
-  const client = { corehr: { v1: { leave: { leaveBalances: async payload => {
-    requests.push(payload)
-    const secondPage = payload.params.page_token === 'next-page'
-    return { code: 0, data: secondPage
-        ? { employment_leave_balance_list: [{ employment_id: 'ou_current', as_of_date: '2026-10-02', leave_balance_list: [] }], has_more: false }
-        : { employment_leave_balance_list: [{ employment_id: 'ou_other', leave_balance_list: [] }], has_more: true, page_token: 'next-page' },
-    }
-  } } } } }
+  const client = { corehr: { v1: {
+    leave: { leaveBalances: async payload => {
+      requests.push(payload)
+      const secondPage = payload.params.page_token === 'next-page'
+      return { code: 0, data: secondPage
+          ? { employment_leave_balance_list: [{ employment_id: 'ou_current', as_of_date: '2026-10-02', leave_balance_list: [] }], has_more: false }
+          : { employment_leave_balance_list: [], has_more: true, page_token: 'next-page' },
+      }
+    } },
+  } } }
   const result = await getMyLeaveBalances(client, 'ou_current')
   assert.equal(result.employment_id, 'ou_current')
   assert.equal(requests.length, 2)
-  assert.deepEqual(requests[0].params, { page_size: '100', user_id_type: 'open_id' })
+  assert.deepEqual(requests[0].params, {
+    page_size: '100',
+    employment_id_list: 'ou_current',
+    user_id_type: 'open_id',
+  })
   assert.equal(requests[1].params.page_token, 'next-page')
 })
 
@@ -424,8 +571,10 @@ test('带取消信号的 HTTP Client 不复用默认 HTTP 实例，避免影响�
   assert.equal(typeof abortableClient.httpInstance.post, 'function')
 })
 
-test('运行时只保留 Axios，避免引入 SDK 的 protobufjs 安装脚本', () => {
-  assert.deepEqual(packageJson.dependencies, { axios: '1.20.0' })
+test('飞书运行时只依赖 Axios，不引入 SDK 的 protobufjs 安装脚本', () => {
+  assert.equal(packageJson.dependencies.axios, '1.20.0')
+  assert.equal('@larksuiteoapi/node-sdk' in packageJson.dependencies, false)
+  assert.equal('protobufjs' in packageJson.dependencies, false)
 })
 
 test('假期余额 Skill 通过 ctx.skills 注册，且正文不包含 YAML frontmatter', () => {

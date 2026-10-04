@@ -4,13 +4,19 @@
  */
 import { getUserInfo, normalizeToken, refreshAccessToken } from './oauth.js'
 import { createFeishuOAuthSdkClient } from './feishu-sdk.js'
-import { configPath, defaultDataDirectory, readJson, tokenPath, writePrivateJson } from './token-store.js'
+import { configPath, defaultDataDirectory, readJson, tokenPath, withCredentialLock, writePrivateJson } from './token-store.js'
 
 // 提前五分钟刷新，避免请求刚发出时 token 恰好过期。
 const REFRESH_BEFORE_MS = 5 * 60 * 1000
 
 function hasRefreshCredentials(credentials) {
   return Boolean(credentials?.appId && credentials?.appSecret)
+}
+
+function sameRefreshSource(expectedCredentials, expectedToken, currentCredentials, currentToken) {
+  return currentCredentials?.appId === expectedCredentials.appId
+    && currentCredentials?.appSecret === expectedCredentials.appSecret
+    && currentToken?.refreshToken === expectedToken.refreshToken
 }
 
 /**
@@ -44,7 +50,17 @@ export async function refreshStoredUserToken({ dataDirectory = defaultDataDirect
   })
   const token = normalizeToken(rawToken, user)
   if (!token.accessToken) throw new Error('飞书刷新 token 失败，请重新授权。')
-  await writePrivateJson(tokenPath(dataDirectory), token)
+  // 网络请求期间用户可能已退出、重新授权或切换应用；旧刷新结果绝不能覆盖新的本机身份。
+  await withCredentialLock(dataDirectory, async () => {
+    const [currentCredentials, currentToken] = await Promise.all([
+      readJson(configPath(dataDirectory)),
+      readJson(tokenPath(dataDirectory)),
+    ])
+    if (!sameRefreshSource(credentials, savedToken, currentCredentials, currentToken)) {
+      throw new Error('飞书登录状态已变化，已丢弃旧的刷新结果，请重试当前操作。')
+    }
+    await writePrivateJson(tokenPath(dataDirectory), token)
+  })
   // user 不写入 token 文件的完整资料只留在本次内存中，供调用方避免重复请求。
   return { token, user }
 }

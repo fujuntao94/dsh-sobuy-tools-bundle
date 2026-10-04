@@ -9,7 +9,7 @@ src/
 │   ├── skills/                      # ctx.skills.register()
 │   ├── services/                    # ctx.provide()
 │   └── hooks/                       # ctx.on(...)
-  ├── domains/                         # 不直接注册到 DSH 的飞书业务与 SDK adapter
+  ├── domains/                         # 不直接注册到 DSH 的飞书业务与 API adapter
 │   ├── auth/                        # OAuth、token、登录页服务、本机私有存储
 │   ├── organization/                # 通讯录与当前用户部门 API
 │   └── leave/                       # 假期余额 API
@@ -32,9 +32,9 @@ src/
 用户问题 / Skill
   → runtime/skills/leave-balance-*.js（选择查询或诊断流程）
   → runtime/tools/leave-balance-tool.js（模型调用入口）
-  → runtime/services/feishu-auth-service.js（当前 OAuth 身份、SDK Client 缓存、并发刷新合并）
+  → runtime/services/feishu-auth-service.js（当前 OAuth 身份、HTTP Client 缓存、并发刷新合并）
   → domains/auth/*（读取、校验或刷新 token）
-  → domains/leave/leave-balance-api.js（SDK adapter：请求飞书接口并筛选当前用户）
+  → domains/leave/leave-balance-api.js（API adapter：请求飞书接口并筛选当前用户）
   → Tool 结果
   → runtime/hooks/feishu-tool-hooks.js（观察最终结果）
   → runtime/services/operation-telemetry-service.js（记录脱敏会话摘要）
@@ -47,7 +47,7 @@ src/
 - `runtime/hooks/` 只监听 DSH 事件；除非明确是策略 Hook，否则不改写 Tool 结果。
 - `runtime/services/` 可以依赖 `domains/`，提供跨多个 Tool 共享的能力。
 - `domains/` 不得依赖 `runtime/`，从而保持 OAuth、组织和假期逻辑可独立测试。
-- `domains/*/*-api.js` 是 SDK adapter：只负责 SDK 参数、响应校验和领域数据转换；不得把 SDK 调用散落到 Tool/Skill。
+- `domains/*/*-api.js` 是 API adapter：只负责请求参数、响应校验和领域数据转换；不得把飞书请求散落到 Tool/Skill。
 - `ui/pages/` 只负责本机浏览器页面，不承担认证或业务决策。
 
 ## 新增能力的放置方式
@@ -56,6 +56,6 @@ src/
 - 新的路由/工作流说明：新增 `runtime/skills/<name>-skill.js`。
 - 多个 Tool 共享的状态或能力：新增 `runtime/services/<name>-service.js`。
 - 监听或拦截 DSH 生命周期：新增 `runtime/hooks/<name>-hooks.js`。
-- 实际飞书 API、OAuth 或领域规则：新增或扩展 `domains/<domain>/`；所有飞书开放平台请求都通过 `domains/auth/feishu-sdk.js` 提供的官方 SDK Client 调用。
+- 实际飞书 API、OAuth 或领域规则：新增或扩展 `domains/<domain>/`；所有飞书开放平台请求都通过 `domains/auth/feishu-sdk.js` 提供的最小 Axios Client 调用。
 
 最后只在根目录 `index.js` 显式装配新文件。

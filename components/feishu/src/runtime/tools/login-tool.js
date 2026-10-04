@@ -169,10 +169,14 @@ function loginToolDefinition({ options, redirectUri, onIdentityChanged = () => {
           // logout 会撤销远端 token，因此传入 DSH 的取消信号以便用户中途停止操作。
           await logout({ dataDirectory: options.dataDirectory, signal: exec.signal })
           onIdentityChanged()
+          // 撤销期间若已有更新的登录完成，logout 会保留新 token；返回值必须反映最终存储状态。
+          const [credentials, token] = await Promise.all([
+            readJson(configPath(options.dataDirectory)),
+            readJson(tokenPath(options.dataDirectory)),
+          ])
           return {
             action,
-            configured: hasApplicationCredentials(await readJson(configPath(options.dataDirectory))),
-            loggedIn: false,
+            ...publicStatus(token, hasApplicationCredentials(credentials)),
           }
         }
 
@@ -195,7 +199,7 @@ function loginToolDefinition({ options, redirectUri, onIdentityChanged = () => {
         assertRedirectUri(options, credentials.redirectUri)
 
         // login：先监听回调，再打开飞书浏览器页，防止用户确认太快而丢失回调。
-        const { authorizationUrl, completed } = createAuthorizationFlow({
+        const { authorizationUrl, ready, completed } = createAuthorizationFlow({
           appId: credentials.appId,
           redirectUri,
           scope: options.oauthScope,
@@ -208,6 +212,9 @@ function loginToolDefinition({ options, redirectUri, onIdentityChanged = () => {
             credentials, redirectUri, code, dataDirectory: options.dataDirectory, signal: exec.signal,
           }),
         })
+        // 先观察 completed，避免端口绑定失败时 ready 与 completed 同时拒绝而产生未处理 Promise。
+        void completed.catch(() => {})
+        await ready
         openInBrowser(authorizationUrl)
 
         // 回调服务已在展示成功页前完成换 token 和私有保存。

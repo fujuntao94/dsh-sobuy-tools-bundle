@@ -12,6 +12,23 @@ import { homedir } from 'node:os'
 import { randomUUID } from 'node:crypto'
 import { isVaultEnabled, readVaultSecret, removeVaultSecret, writeVaultSecret } from './credential-vault.js'
 
+// 同一数据目录的身份切换、退出、授权保存与刷新提交必须串行，防止旧网络请求覆盖新登录态。
+const credentialLocks = new Map()
+
+export async function withCredentialLock(dataDirectory, work) {
+  const previous = credentialLocks.get(dataDirectory) || Promise.resolve()
+  let release
+  const current = new Promise(resolve => { release = resolve })
+  credentialLocks.set(dataDirectory, current)
+  await previous
+  try {
+    return await work()
+  } finally {
+    release()
+    if (credentialLocks.get(dataDirectory) === current) credentialLocks.delete(dataDirectory)
+  }
+}
+
 /** 固定使用既有数据目录，确保品牌重命名不影响已有登录态。 */
 export function defaultDataDirectory() {
   return join(process.env.DSH_HOME || join(homedir(), '.dsh'), 'feishu-login')

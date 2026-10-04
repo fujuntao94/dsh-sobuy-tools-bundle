@@ -49,8 +49,9 @@ Skills 均通过 `ctx.skills.register()` 在插件启动时注册，不依赖文
 `feishu_my_leave_balances` 按如下顺序执行：
 
 1. 校验当前 OAuth 登录态；用户 token 已过期或临近过期时才刷新。
-2. 通过飞书官方 Node SDK 获取或复用应用 `tenant_access_token`。
-3. 使用 SDK 请求假期余额，并仅筛选当前 OAuth 用户的记录。
+2. 通过内置 Axios HTTP Client 获取或复用应用 `tenant_access_token`。
+3. 以 `user_id_type=open_id` 和 `employment_id_list=<当前用户 open_id>` 请求假期余额，上游只返回当前用户记录。
+4. 适配层再次校验响应中的用户标识，不向 Tool 层传递其他员工记录。
 
 余额为空不等于余额为零，也不会触发额外登录或反复查询。
 
@@ -63,7 +64,7 @@ Skills 均通过 `ctx.skills.register()` 在插件启动时注册，不依赖文
 - `contact:user.department:readonly`
 - `contact:department.base:readonly`
 
-如需查询假期余额，还需要申请并获批飞书人事“批量查询员工假期余额（`corehr.v1.leave.leave_balances`）”权限，并确认租户已启用飞书人事假期管理。
+如需查询假期余额，还需要申请并获批飞书人事“批量查询员工假期余额（`corehr.v1.leave.leave_balances`）”对应权限，并确认租户已启用飞书人事假期管理。
 
 在应用的重定向地址白名单中添加：
 
@@ -85,22 +86,22 @@ http://127.0.0.1:18080/feishu/callback
 
 日志按 DSH 会话隔离，只保留插件进程内最近 100 条，插件重启后清空。DSH 自身仍会持久记录标准的 Tool 调用与结果事件。本插件还监听 DSH 的 `tools/result` Hook，以补记在 Tool 本体执行前就被策略或参数校验拒绝的飞书操作。
 
-日志与 Tool 输出不会包含 token、App Secret、授权码、`open_id`、员工 ID、部门 ID 或飞书原始接口响应。SDK 的请求日志也会被禁用，避免原始请求对象进入标准输出。
+日志与 Tool 输出不会包含 token、App Secret、授权码、`open_id`、员工 ID、部门 ID 或飞书原始接口响应。HTTP Client 不输出请求对象，避免凭据进入标准输出。
 
-## 飞书 SDK
+## 飞书 API Client
 
 所有访问飞书开放平台的请求均使用 `axios` 直连插件实际需要的接口：OAuth 授权码换 token、刷新、撤销、用户资料，以及应用身份的通讯录与假期余额。OAuth 用户登录、token 的本机加密存储和登录状态判断仍由本插件的 `domains/auth/` 管理；浏览器设置页对本机服务的 `fetch` 不会访问飞书。
 
 ### 调用与权限矩阵
 
-| 能力 | 调用身份 | SDK 入口 | 必要权限/条件 | 登录态行为 |
+| 能力 | 调用身份 | Client 入口 | 必要权限/条件 | 登录态行为 |
 | --- | --- | --- | --- | --- |
 | OAuth 登录、刷新、退出 | OAuth 应用凭据 | `accessToken`、`request` | `offline_access`、回调地址 | 登录或临近到期才刷新 |
 | 当前用户资料 | `user_access_token` | `authen.v1.userInfo.get` | `contact:user.base:readonly` | 先校验或刷新登录态 |
 | 我的部门与负责人 | `tenant_access_token` | `contact.v3.user/department.get` | 用户/部门通讯录权限与可见范围 | 先校验当前 OAuth 用户 |
-| 我的假期余额 | `tenant_access_token` | `corehr.v1.leave.leaveBalances` | 人事假期余额权限 | 先校验当前 OAuth 用户 |
+| 我的假期余额 | `tenant_access_token` | `corehr.v1.leave.leaveBalances` | 人事假期余额权限 | 先校验当前 OAuth 用户，并按 `open_id` 过滤 |
 
-认证 Service 缓存应用与 OAuth SDK Client；多个 Tool 同时发现用户 token 过期时只会执行一次刷新。带取消信号的调用使用独立 SDK Client，因此一个已取消的 Tool 不会取消其他 Tool 的请求。
+认证 Service 缓存应用与 OAuth HTTP Client；多个 Tool 同时发现用户 token 过期时只会执行一次刷新。带取消信号的调用使用独立 Client，因此一个已取消的 Tool 不会取消其他 Tool 的请求；登录、退出或切换应用后，在途旧请求不会覆盖新身份。
 
 ### 错误诊断
 

@@ -22,7 +22,7 @@ async function getUserDisplayName(client, openId) {
 }
 
 /**
- * 以官方 SDK 的应用身份查询指定 OAuth 当前用户所属的部门，再读取每个部门详情。
+ * 以应用身份查询指定 OAuth 当前用户所属的部门，再读取每个部门详情。
  *
  * openId 只用于锁定 OAuth 当前用户；department_ids 是飞书返回的内部引用，均不直接返回给工具调用者。
  */

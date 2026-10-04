@@ -21,6 +21,8 @@ export function createFeishuAuthService({
   let applicationClient
   let oauthClient
   let clientKey
+  // 每次登录身份变化都会递增；旧请求完成后不得再写缓存或覆盖新请求的 single-flight。
+  let identityGeneration = 0
 
   function waitForActiveUser(promise, signal) {
     if (!signal) return promise
@@ -66,9 +68,12 @@ export function createFeishuAuthService({
     return oauthClient
   }
 
-  async function loadActiveUser(signal) {
+  async function loadActiveUser(signal, generation) {
     const oauth = await getOAuthClient({ signal })
     const active = await getValidUserTokenImpl({ dataDirectory, signal, oauthClient: oauth })
+    if (generation !== identityGeneration) {
+      throw new Error('飞书登录状态已变化，请重试当前操作。')
+    }
     const cacheUntil = Number(active.token.expiresAt || 0) - 5 * 60 * 1000
     cachedActiveUser = { active, cacheUntil }
     return active
@@ -88,7 +93,12 @@ export function createFeishuAuthService({
     // 所有 Tool 共用同一个 Promise，refresh_token 只会刷新一次。
     if (!pendingActiveUser) {
       // 刷新是共享操作，不能绑定首个 Tool 的取消信号；每个调用方只取消自己的等待。
-      pendingActiveUser = loadActiveUser().finally(() => { pendingActiveUser = undefined })
+      const generation = identityGeneration
+      const shared = loadActiveUser(undefined, generation).finally(() => {
+        // clearCurrentUserCache 后可能已经启动新一代请求，旧 Promise 不能把它清掉。
+        if (pendingActiveUser === shared) pendingActiveUser = undefined
+      })
+      pendingActiveUser = shared
     }
     return waitForActiveUser(pendingActiveUser, signal)
   }
@@ -104,13 +114,18 @@ export function createFeishuAuthService({
 
     // 登录、刷新或退出后由登录 Tool 调用，避免账户切换时使用旧身份缓存。
     clearCurrentUserCache() {
+      identityGeneration += 1
       cachedActiveUser = undefined
       pendingActiveUser = undefined
     },
 
     async refreshCurrentUser({ signal } = {}) {
+      const generation = identityGeneration
       const oauth = await getOAuthClient({ signal })
       const refreshed = await refreshStoredUserTokenImpl({ dataDirectory, signal, oauthClient: oauth })
+      if (generation !== identityGeneration) {
+        throw new Error('飞书登录状态已变化，请重试当前操作。')
+      }
       cachedActiveUser = { active: { token: refreshed.token, refreshed: true, user: refreshed.user }, cacheUntil: refreshed.token.expiresAt - 5 * 60 * 1000 }
       return refreshed
     },

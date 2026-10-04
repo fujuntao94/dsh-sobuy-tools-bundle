@@ -1,6 +1,6 @@
 {
   "name": "dsh-sobuy-tools-bundle",
-  "version": "0.1.6",
+  "version": "0.1.9",
   "description": "Sobuy DSH 工具组件包：飞书工具与数据查询。",
   "type": "module",
   "files": [
@@ -12,11 +12,12 @@
     "components/"
   ],
   "scripts": {
-    "test": "node --test components/feishu/test/oauth.test.js && node --check components/database/index.js",
-    "check": "node --check client.js && cd components/feishu && node scripts/check-syntax.js && node --check ../database/index.js"
+    "test": "node --test components/feishu/test/oauth.test.js components/database/test/setup.test.js components/database/test/table-catalog.test.js components/database/test/security.test.js",
+    "check": "node --check client.js && cd components/feishu && node scripts/check-syntax.js && cd ../database && node --check index.js && node --check src/setup-page.js && node --check src/storage/config-store.js && node --check src/domains/connection.js && node --check src/domains/table-catalog.js && node --check src/domains/account-security.js && node --check src/security/policy.js && node --check src/security/query-audit.js && node --check src/security/sensitive-fields.js && node --check src/security/safe-select.js && node --check src/runtime/services/database-security-service.js && node --check src/runtime/tools/list-tables-tool.js && node --check src/runtime/tools/security-check-tool.js && node --check src/runtime/skills/table-catalog-skill.js && node --check src/runtime/skills/security-check-skill.js"
   },
   "dependencies": {
-    "axios": "1.20.0"
+    "axios": "1.20.0",
+    "mysql2": "3.24.5"
   },
   "main": "index.js",
   "exports": {

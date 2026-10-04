@@ -54,9 +54,12 @@ export function buildAuthorizeUrl({ appId, redirectUri, state, scope = 'offline_
 /** 创建一次 OAuth 回调流程；设置页跳转和 Tool 直接打开浏览器共用相同的 state 校验与完成逻辑。 */
 export function createAuthorizationFlow({ appId, redirectUri, scope, host, port, path, timeoutMs, signal, onAuthorizationCode }) {
   const state = createState()
+  const callback = waitForCallback({ host, port, path, expectedState: state, timeoutMs, signal, onAuthorizationCode })
   return {
     authorizationUrl: buildAuthorizeUrl({ appId, redirectUri, state, scope }),
-    completed: waitForCallback({ host, port, path, expectedState: state, timeoutMs, signal, onAuthorizationCode }),
+    // 调用方必须先等待 ready，再跳转授权页；端口占用时不能让用户完成一场无法回调的授权。
+    ready: callback.ready,
+    completed: callback.completed,
   }
 }
 
@@ -75,7 +78,7 @@ export function openInBrowser(url) {
 }
 
 /** 将回环监听参数转换为浏览器可访问的本机地址。 */
-function localOrigin(host, port) {
+export function localOrigin(host, port) {
   return `http://${host === '::1' ? '[::1]' : host}:${port}`
 }
 
@@ -189,7 +192,22 @@ export function startSetupPageServer({ host, port, setupPath, statusPath, getSta
  * Promise 只有成功拿到授权码、回调异常、超时或用户取消四种结束路径；任一路径均会关闭服务。
  */
 export function waitForCallback({ host, port, path, expectedState, timeoutMs, signal, onAuthorizationCode }) {
-  return new Promise((resolve, reject) => {
+  let resolveReady
+  let rejectReady
+  let readySettled = false
+  const ready = new Promise((resolve, reject) => {
+    resolveReady = value => {
+      if (readySettled) return
+      readySettled = true
+      resolve(value)
+    }
+    rejectReady = error => {
+      if (readySettled) return
+      readySettled = true
+      reject(error)
+    }
+  })
+  const completed = new Promise((resolve, reject) => {
     let settled = false
     // 统一清理定时器、取消监听器和 HTTP 服务，避免多次回调导致重复 resolve/reject。
     const done = (callback) => {
@@ -205,12 +223,15 @@ export function waitForCallback({ host, port, path, expectedState, timeoutMs, si
       server.close(callback)
     }
     // 将所有失败出口收敛到 done()，保证资源只释放一次。
-    const fail = (error) => done(() => reject(error))
+    const fail = (error) => {
+      rejectReady(error)
+      done(() => reject(error))
+    }
     const succeed = (code) => done(() => resolve(code))
     const abort = () => fail(new Error('授权已取消'))
     // 服务只处理精确 callbackPath；其他路径不泄露任何授权状态。
     const server = createServer(async (request, response) => {
-      const requestUrl = new URL(request.url || '/', `http://${host}:${port}`)
+      const requestUrl = new URL(request.url || '/', localOrigin(host, port))
       if (requestUrl.pathname !== path) {
         response.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' })
         response.end('Not Found')
@@ -219,11 +240,17 @@ export function waitForCallback({ host, port, path, expectedState, timeoutMs, si
       // 飞书授权成功时携带 code 与原样返回的 state。
       const code = requestUrl.searchParams.get('code')
       const state = requestUrl.searchParams.get('state')
-      // state 必须严格相等；不接受缺失、过期或其他登录尝试产生的回调。
-      if (!code || state !== expectedState) {
+      // 不匹配的 state 可能来自旧标签页或本机探测请求：拒绝当前请求，但继续等待真正的回调。
+      if (state !== expectedState) {
         response.writeHead(400, { 'Content-Type': 'text/html; charset=utf-8' })
         response.end(callbackHtml('飞书授权失败', '授权参数无效或已失效，请回到桌面端重新发起登录。'))
-        fail(new Error('飞书回调的 state 校验失败或缺少授权码'))
+        return
+      }
+      // state 正确却没有授权码，说明本次授权已结束且无法继续等待。
+      if (!code) {
+        response.writeHead(400, { 'Content-Type': 'text/html; charset=utf-8' })
+        response.end(callbackHtml('飞书授权失败', '飞书未返回授权码，请重新发起登录。'))
+        fail(new Error('飞书回调缺少授权码'))
         return
       }
       try {
@@ -242,10 +269,15 @@ export function waitForCallback({ host, port, path, expectedState, timeoutMs, si
     // 授权页面长期闲置时自动回收端口和内存，默认超时时间由插件配置决定。
     const timeout = setTimeout(() => fail(new Error('等待飞书授权超时，请重新登录')), timeoutMs)
     server.once('error', error => fail(new Error(`无法启动本机授权回调服务：${error.message}`)))
+    if (signal?.aborted) {
+      abort()
+      return
+    }
     signal?.addEventListener('abort', abort, { once: true })
     // exclusive 防止同一端口被多个 callback 服务共享，端口被占用会进入上方 error 分支。
-    server.listen({ host, port, exclusive: true })
+    server.listen({ host, port, exclusive: true }, () => resolveReady(localOrigin(host, port)))
   })
+  return { ready, completed }
 }
 
 function legacyTokenShape(token) {

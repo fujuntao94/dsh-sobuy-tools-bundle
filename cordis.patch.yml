@@ -14,4 +14,8 @@
         authorizationTimeoutMs: 300000
     - id: sobuy-database-tools
       name: dsh-sobuy-tools-bundle/database
-      config: {}
+      config:
+        setupHost: 127.0.0.1
+        setupPort: 18082
+        setupPath: /database/setup
+        statusPath: /database/status

@@ -1,6 +1,6 @@
 {
   "name": "sobuy-plugin-core",
-  "version": "0.1.33",
+  "version": "0.1.34",
   "description": "Shared local setup and private-storage primitives for Sobuy DSH components.",
   "type": "module",
   "exports": {

@@ -38,7 +38,12 @@ function rowLines(row, index) {
     headline,
     `   原因：${row.attributionNote}`,
     row.currentState ? `   状态：${state}${row.waitHours !== undefined ? `，已等待 ${row.waitHours} 小时` : ''}` : null,
+    row.impactNote ? `   影响：${row.impactLabel || row.impactLevel}；${row.impactNote}` : null,
+    row.shortageDays ? `   趋势：${row.shortageTrend || '新近'}缺货，窗口内涉及 ${row.shortageDays} 个下单日${row.overdueShipRows ? `；${row.overdueShipRows} 行已超过强制发货时间` : ''}` : null,
     `   依据：${evidence.join('；')}`,
+    row.recoveryBasis ? `   恢复依据：${row.recoveryBasis}${row.recoveryEta ? ` 预计时间 ${row.recoveryEta}` : ''}` : null,
+    row.forecastRiskNote ? `   预测风险：${row.forecastRiskLabel || row.forecastRisk}；${row.forecastRiskNote}` : null,
+    row.responsibleOwners ? `   责任人：${row.responsibleOwners}` : null,
     row.primaryAction ? `   建议：${row.primaryAction}` : null,
     row.contributingFactors?.length
       ? `   并发因素：${row.contributingFactors.map(factor => factor.label).join('；')}`
@@ -54,7 +59,7 @@ export function createSoldoutAttributionTool({
 } = {}) {
   return {
     name: 'database_soldout_attribution',
-    description: `只读分析近 N 天的订单缺货情况：默认只看当前仍待处理的缺货订单，可按 SKU×仓库或仓库聚合；对照当前库存、库存明细、库存预警和关联预售货柜，返回主因、并发因素及下一步动作。时间锚点是下单时间，窗口上限 ${MAX_WINDOW_DAYS} 天。不接受 SQL，只返回 SKU、仓库和数量，不返回客户隐私字段。`,
+    description: `只读分析近 N 天的订单缺货情况：默认只看当前仍待处理的缺货订单，可按 SKU×仓库或仓库聚合；对照当前库存、库存明细、库存预警、货柜、上架任务和当月预测，返回主因、并发因素、恢复依据、影响优先级和下一步动作。时间锚点是下单时间，窗口上限 ${MAX_WINDOW_DAYS} 天。不接受 SQL，只返回 SKU、仓库和数量，不返回客户隐私字段。`,
     parameters: {
       type: 'object',
       additionalProperties: false,
@@ -94,12 +99,15 @@ export function createSoldoutAttributionTool({
           groups: { type: 'number', description: '本次返回的分组条数。' },
           actionSummary: {
             type: 'object', additionalProperties: false,
-            required: ['scope', 'byReason', 'byWarehouse', 'byOwner'],
+            required: ['scope', 'byReason', 'byWarehouse', 'byOwner', 'byImpact', 'byForecastRisk', 'byTrend'],
             properties: {
               scope: STRING,
               byReason: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['reason', 'groups', 'orderCount', 'quantitySum'], properties: { reason: STRING, groups: NUMBER, orderCount: NUMBER, quantitySum: NUMBER } } },
               byWarehouse: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['warehouse', 'groups', 'orderCount', 'quantitySum'], properties: { warehouse: STRING, groups: NUMBER, orderCount: NUMBER, quantitySum: NUMBER } } },
               byOwner: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['owner', 'groups', 'orderCount', 'quantitySum'], properties: { owner: STRING, groups: NUMBER, orderCount: NUMBER, quantitySum: NUMBER } } },
+              byImpact: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['impact', 'groups', 'orderCount', 'quantitySum'], properties: { impact: STRING, groups: NUMBER, orderCount: NUMBER, quantitySum: NUMBER } } },
+              byForecastRisk: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['forecastRisk', 'groups', 'orderCount', 'quantitySum'], properties: { forecastRisk: STRING, groups: NUMBER, orderCount: NUMBER, quantitySum: NUMBER } } },
+              byTrend: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['trend', 'groups', 'orderCount', 'quantitySum'], properties: { trend: STRING, groups: NUMBER, orderCount: NUMBER, quantitySum: NUMBER } } },
             },
           },
           rows: {
@@ -118,6 +126,10 @@ export function createSoldoutAttributionTool({
                 quantitySum: { type: 'number', description: '缺货数量合计。' },
                 lastSoldoutTime: STRING,
                 oldestShortageTime: STRING,
+                shortageDays: { type: 'number', description: '仅 group_by=sku 时返回，窗口内有缺货订单的不同下单日期数量，不等同于连续缺货天数。' },
+                shortageTrend: { type: 'string', description: '仅 group_by=sku 时返回，按 shortageDays 划分为新近、反复或持续。' },
+                overdueShipRows: { type: 'number', description: '仅 group_by=sku 时返回，强制发货时间已过的缺货行数。' },
+                earliestPlanPrintTime: { type: 'string', description: '仅 group_by=sku 时返回，最早的强制发货时间。' },
                 currentState: { type: 'string', description: '仅 group_by=sku 时返回：active、recovered_or_closed 或 mixed。' },
                 soldoutStateRows: { type: 'number', description: '状态为已断货(3D|3D)的行数。' },
                 processingRows: { type: 'number', description: '状态为订单缺货处理(1A|06)的行数。' },
@@ -132,6 +144,7 @@ export function createSoldoutAttributionTool({
                 containerAtaStore: { type: 'string', description: '关联货柜样本的实际到库时间。' },
                 containerPresaleExpire: { type: 'string', description: '关联货柜样本的预售截止时间。' },
                 containerPresaleStatus: { type: 'number', description: '关联货柜样本的预售状态。' },
+                containerLoadQty: { type: 'number', description: '关联货柜样本中该 SKU 的装柜量。' },
                 localAvailable: { type: 'number', description: '仅 group_by=sku 时返回，发货仓当前可用库存。' },
                 localUsednum: { type: 'number', description: '仅 group_by=sku 时返回，发货仓现货占用数量。' },
                 localStockStatus: { type: 'number', description: '仅 group_by=sku 时返回，库存上架状态。' },
@@ -141,6 +154,11 @@ export function createSoldoutAttributionTool({
                 transferCandidates: { type: 'string', description: '仅 group_by=sku 时返回，其他仓的候选调拨库存，不代表已创建调拨任务。' },
                 pendingShelvingTasks: { type: 'number', description: '仅 group_by=sku 时返回，未完成的预售或现货上架任务数。' },
                 pendingTaskOwners: { type: 'string', description: '仅 group_by=sku 时返回，未完成上架任务的责任人。' },
+                oldestShelvingTaskCreatedAt: { type: 'string', description: '仅 group_by=sku 时返回，最早未完成上架任务创建时间。' },
+                pendingShelvingHours: { type: 'number', description: '仅 group_by=sku 时返回，最早未完成上架任务的等待小时数。' },
+                monthlyForecastQty: { type: 'number', description: '仅 group_by=sku 时返回，当月预测销量合计。' },
+                forecastOwners: { type: 'string', description: '仅 group_by=sku 时返回，当月预测记录责任人。' },
+                responsibleOwners: { type: 'string', description: '仅 group_by=sku 时返回，上架任务责任人与预测责任人的去重合并，仅作待办跟进线索。' },
                 warningPresellNum: { type: 'number', description: '仅 group_by=sku 时返回，库存预警的预售量。' },
                 warningCriticalValue: { type: 'number', description: '仅 group_by=sku 时返回，库存预警的临界值 A。' },
                 warningDealFlag: NUMBER,
@@ -160,6 +178,17 @@ export function createSoldoutAttributionTool({
                   },
                 },
                 recommendedActions: { type: 'array', items: STRING, description: '仅 group_by=sku 时返回，去重后的建议动作。' },
+                impactLevel: { type: 'string', description: '仅 group_by=sku 时返回，按强制发货超时、等待时长和受影响订单/数量推断的影响等级。' },
+                impactLabel: STRING,
+                impactNote: STRING,
+                recoveryStatus: { type: 'string', description: '仅 group_by=sku 时返回，当前恢复依据状态，不代表承诺的恢复结果。' },
+                recoveryEta: { type: 'string', description: '仅 group_by=sku 时返回，关联在途货柜的预计到库时间；空字符串表示当前没有可确认 ETA。' },
+                recoveryBasis: STRING,
+                forecastRisk: { type: 'string', description: '仅 group_by=sku 时返回，按当月预测销量与当前本仓可用库存计算的风险等级。' },
+                forecastRiskLabel: STRING,
+                forecastDailyQty: { type: 'number', description: '仅 group_by=sku 时返回，由当月预测销量折算的日均数量。' },
+                stockCoverDays: { type: 'number', description: '仅 group_by=sku 时返回，当前本仓可用库存按预测日均销量估算的覆盖天数。' },
+                forecastRiskNote: STRING,
                 waitHours: { type: 'number', description: '仅 group_by=sku 时返回，自最早缺货或下单时间起的等待小时数。' },
                 priority: { type: 'string', description: '仅 group_by=sku 时返回，P0 至 P3 的待办优先级。' },
                 priorityScore: { type: 'number', description: '仅 group_by=sku 时返回，用于待办排序的内部评分。' },
@@ -176,12 +205,16 @@ export function createSoldoutAttributionTool({
         const summary = value.actionSummary?.byReason?.length
           ? `待办汇总（本次返回范围）：${value.actionSummary.byReason.map(item => `${item.reason} ${item.quantitySum} 件`).join('；')}`
           : null
+        const impactSummary = value.actionSummary?.byImpact?.length
+          ? `影响分级：${value.actionSummary.byImpact.map(item => `${item.impact} ${item.quantitySum} 件`).join('；')}`
+          : null
         const text = [
           `近 ${value.windowDays} 天缺货归因（${value.scope === 'active' ? '当前待处理口径' : '历史缺货口径'}，按${dimension}聚合，共 ${value.groups} 条，时间锚点为下单时间，生成于 ${value.generatedAt}）：`,
           summary,
+          impactSummary,
           ...value.rows.flatMap((row, index) => rowLines(row, index)),
           value.groupBy === 'sku'
-            ? '注意：主因、并发因素和动作均基于当前库存、预警及关联货柜推断，不是数据库中的原因字段；库存为当前快照，货柜仅使用关联样本。'
+            ? '注意：主因、并发因素、影响等级、恢复依据和预测风险均基于当前库存、预警、货柜、上架任务与预测数据推断，不是数据库中的原因字段；库存为当前快照，货柜仅使用关联样本。'
             : '注意：仓库维度不推断原因，只反映缺货分布；需要原因请改用 group_by=sku。',
         ].join('\n')
         return [{ type: 'text', text }]

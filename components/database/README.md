@@ -58,7 +58,8 @@ SQL 是代码内固定的聚合模板，模型只能选聚合维度和填参数�
 - `oms_t_inventory`、`oms_t_inventory_detail`：比对发货仓与其他仓的**当前**可用库存、现货占用和明细预售占用。
 - `early_warn_inventory_info`：按 SKU×仓库匹配**最新有效**库存预警的预售量、临界值与处理状态（`is_delete = 0`）。
 - `bas_t_container`、`bas_t_container_sku`：用订单关联货柜样本补充预售货柜的预计/实际到库状态。
-- `bas_t_work_stock`：匹配未完成的预售/现货上架任务及其责任人。
+- `bas_t_work_stock`：匹配未完成的预售/现货上架任务、责任人及最早任务创建时间。
+- `report_t_predict_sku`：匹配当前自然月的 SKU×仓库预测销量与预测责任人；用当前本仓可用库存折算预测覆盖天数。
 
 `attribution` 是对上述证据的主因推断；`contributingFactors` 保留并发因素；`primaryAction` 和 `recommendedActions` 提供下一步动作。它们均不是数据库中的原因字段。
 
@@ -81,7 +82,14 @@ SQL 是代码内固定的聚合模板，模型只能选聚合维度和填参数�
 
 固定归因查询不依赖业务表白名单，且不接受表名或 SQL 参数；查询只选出 SKU、仓库和数量，不含客户姓名、地址、电话或邮箱。
 
-SKU 维度结果按 P0–P3 待办优先级排序，并附带本次返回范围内按主因、仓库和上下架任务责任人的汇总。`historical` 口径还会通过 `currentState` 标示该分组当前是 `active`、`recovered_or_closed` 还是 `mixed`。
+SKU 维度结果按 P0–P3 待办优先级排序，并附带本次返回范围内按主因、仓库、责任人、影响等级、预测风险和缺货趋势的汇总。每条 SKU×仓库还会返回：
+
+- `impactLevel` / `impactNote`：由强制发货是否超时、等待时长及受影响订单/数量推断的影响等级；它不是订单金额优先级，也没有跨币种金额加总。
+- `recoveryStatus` / `recoveryBasis` / `recoveryEta`：当前库存、关联在途货柜或上架任务提供的恢复线索；只有货柜预计到库时间会作为 ETA，不能据此承诺恢复结果。
+- `shortageDays` / `shortageTrend`：窗口内有缺货订单的不同下单日期数量及“新近/反复/持续”分组；它不是严格连续断货天数。
+- `forecastRisk` / `stockCoverDays`：用**当前**本仓可用库存与当前自然月预测销量估算的预警风险；缺预测数据时明确返回“无预测数据”，不臆造销量。
+
+`historical` 口径还会通过 `currentState` 标示该分组当前是 `active`、`recovered_or_closed` 还是 `mixed`。
 
 ## 缺货快照
 

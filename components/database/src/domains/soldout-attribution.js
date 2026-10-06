@@ -30,7 +30,7 @@ export const SOLD_OUT_ATTRIBUTION_TABLES = Object.freeze([
 ])
 
 export const DEFAULT_WINDOW_DAYS = 30
-/** 实测：7 天 0.6s / 30 天 0.7s / 45 天 1.0s，但 60 天会跳到 13.9s 并撞 5s 超时。 */
+/** historical 实测：7 天 0.6s / 30 天 0.7s / 45 天 1.0s，但 60 天会跳到 13.9s 并撞 5s 超时。 */
 export const MAX_WINDOW_DAYS = 45
 export const DEFAULT_TOP_N = 20
 export const MAX_TOP_N = 500
@@ -105,8 +105,9 @@ export function normalizeAttributionParams(input = {}) {
 }
 
 /**
- * 时间窗与缺货口径。仓库过滤由调用方单独拼接，避免 `warehouse_id = ?` 重复出现
- * 导致占位符数量与参数个数不一致。
+ * 缺货口径。active 是全量当前待处理队列，不能因为下单超过 45 天而遗漏；
+ * historical 才使用时间窗，避免历史复盘扫描无边界增长。仓库过滤由调用方单独拼接，
+ * 避免 `warehouse_id = ?` 重复出现导致占位符数量与参数个数不一致。
  */
 function trackingFilter(scope) {
   const activeCondition = [
@@ -120,7 +121,7 @@ function trackingFilter(scope) {
     : `(${SHORTAGE_CONDITION})`
   return [
     'valid = 1',
-    'order_time >= DATE_SUB(NOW(), INTERVAL ? DAY)',
+    ...(scope === 'historical' ? ['order_time >= DATE_SUB(NOW(), INTERVAL ? DAY)'] : []),
     scopeCondition,
   ].join('\n    AND ')
 }
@@ -150,6 +151,7 @@ const SKU_AGGREGATE_COLUMNS = `
 export function buildSoldoutAttributionQuery(input = {}) {
   const params = normalizeAttributionParams(input)
   const hasWarehouseFilter = params.warehouse_id !== null
+  const hasTimeWindow = params.scope === 'historical'
   const warehouseFilter = hasWarehouseFilter ? ' AND warehouse_id = ?' : ''
   const filter = trackingFilter(params.scope)
 
@@ -286,7 +288,7 @@ ORDER BY soldout_rows DESC, quantity_sum DESC
 LIMIT ?`
 
   const values = [
-    params.window_days,
+    ...(hasTimeWindow ? [params.window_days] : []),
     ...(hasWarehouseFilter ? [params.warehouse_id] : []),
     params.top_n,
   ]
@@ -300,6 +302,7 @@ LIMIT ?`
       windowDays: params.window_days,
       appliedLimit: params.top_n,
       hasWarehouseFilter,
+      timeRange: hasTimeWindow ? `last_${params.window_days}_days` : 'all_active',
     },
   }
 }
@@ -625,6 +628,7 @@ export async function runSoldoutAttribution(config, input = {}, {
   const actionSummary = buildAttributionActionSummary(normalized, params.group_by, now())
   return {
     windowDays: params.window_days,
+    timeRange: built.meta.timeRange,
     groupBy: params.group_by,
     scope: params.scope,
     generatedAt: formatLocalDateTime(now()),

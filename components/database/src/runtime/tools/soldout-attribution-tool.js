@@ -59,14 +59,14 @@ export function createSoldoutAttributionTool({
 } = {}) {
   return {
     name: 'database_soldout_attribution',
-    description: `只读分析近 N 天的订单缺货情况：默认只看当前仍待处理的缺货订单，可按 SKU×仓库或仓库聚合；对照当前库存、库存明细、库存预警、货柜、上架任务和当月预测，返回主因、并发因素、恢复依据、影响优先级和下一步动作。时间锚点是下单时间，窗口上限 ${MAX_WINDOW_DAYS} 天。不接受 SQL，只返回 SKU、仓库和数量，不返回客户隐私字段。`,
+    description: `只读分析订单缺货情况：默认统计全部当前仍待处理的缺货订单，可按 SKU×仓库或仓库聚合；历史复盘才受时间窗口限制。对照当前库存、库存明细、库存预警、货柜、上架任务和当月预测，返回主因、并发因素、恢复依据、影响优先级和下一步动作。不接受 SQL，只返回 SKU、仓库和数量，不返回客户隐私字段。`,
     parameters: {
       type: 'object',
       additionalProperties: false,
       properties: {
         window_days: {
           type: 'integer', minimum: 1, maximum: MAX_WINDOW_DAYS,
-          description: `统计窗口天数，按订单下单时间筛选，默认 ${DEFAULT_WINDOW_DAYS}，上限 ${MAX_WINDOW_DAYS}。`,
+          description: `仅 historical 历史复盘口径使用：按订单下单时间筛选，默认 ${DEFAULT_WINDOW_DAYS}，上限 ${MAX_WINDOW_DAYS}。active 口径始终统计全部当前待处理订单，不受此参数限制。`,
         },
         group_by: {
           type: 'string', enum: ['sku', 'warehouse'],
@@ -74,7 +74,7 @@ export function createSoldoutAttributionTool({
         },
         scope: {
           type: 'string', enum: ['active', 'historical'],
-          description: '统计口径：active（默认）只看当前未发货、未撤单、未取消的缺货状态；historical 保留窗口内曾符合缺货口径的历史订单。',
+          description: '统计口径：active（默认）统计全部当前未发货、未撤单、未取消的缺货状态，不限制下单时间；historical 只复盘 window_days 内曾符合缺货口径的订单。',
         },
         warehouse_id: {
           type: 'integer', minimum: 1,
@@ -90,9 +90,10 @@ export function createSoldoutAttributionTool({
       schema: {
         type: 'object',
         additionalProperties: false,
-        required: ['windowDays', 'groupBy', 'scope', 'generatedAt', 'groups', 'actionSummary', 'rows'],
+        required: ['windowDays', 'timeRange', 'groupBy', 'scope', 'generatedAt', 'groups', 'actionSummary', 'rows'],
         properties: {
           windowDays: NUMBER,
+          timeRange: { type: 'string', description: '实际时间口径：all_active 表示全部当前待处理订单；last_N_days 表示历史复盘窗口。' },
           groupBy: STRING,
           scope: STRING,
           generatedAt: STRING,
@@ -199,7 +200,9 @@ export function createSoldoutAttributionTool({
       },
       render: (_args, value) => {
         if (!value.rows.length) {
-          return [{ type: 'text', text: `近 ${value.windowDays} 天没有发现符合缺货口径的订单记录。` }]
+          return [{ type: 'text', text: value.scope === 'active'
+            ? '没有发现当前仍待处理的缺货订单记录。'
+            : `近 ${value.windowDays} 天没有发现符合缺货口径的订单记录。` }]
         }
         const dimension = value.groupBy === 'warehouse' ? '仓库' : 'SKU 与仓库'
         const summary = value.actionSummary?.byReason?.length
@@ -209,7 +212,7 @@ export function createSoldoutAttributionTool({
           ? `影响分级：${value.actionSummary.byImpact.map(item => `${item.impact} ${item.quantitySum} 件`).join('；')}`
           : null
         const text = [
-          `近 ${value.windowDays} 天缺货归因（${value.scope === 'active' ? '当前待处理口径' : '历史缺货口径'}，按${dimension}聚合，共 ${value.groups} 条，时间锚点为下单时间，生成于 ${value.generatedAt}）：`,
+          `${value.scope === 'active' ? '全部当前待处理订单' : `近 ${value.windowDays} 天历史缺货订单`}归因（按${dimension}聚合，共 ${value.groups} 条，时间锚点为下单时间，生成于 ${value.generatedAt}）：`,
           summary,
           impactSummary,
           ...value.rows.flatMap((row, index) => rowLines(row, index)),

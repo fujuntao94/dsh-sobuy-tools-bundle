@@ -63,9 +63,10 @@ test('归因查询只生成单条只读 SELECT，且不选出任何客户隐私�
   for (const table of SOLD_OUT_ATTRIBUTION_TABLES) assert.match(built.sql, new RegExp(`\\b${table}\\b`))
   assert.doesNotMatch(built.sql, /cust_|_tel|tel_|email|postcode|street|vat_|address|iban|iban_/i)
   assert.match(built.sql, /LIMIT \?$/)
-  assert.deepEqual(built.values, [30, 20])
-  assert.deepEqual(built.meta, { groupBy: 'sku', scope: 'active', windowDays: 30, appliedLimit: 20, hasWarehouseFilter: false })
+  assert.deepEqual(built.values, [20])
+  assert.deepEqual(built.meta, { groupBy: 'sku', scope: 'active', windowDays: 30, appliedLimit: 20, hasWarehouseFilter: false, timeRange: 'all_active' })
   assert.match(built.sql, /COALESCE\(is_send, 0\) <> 1/)
+  assert.doesNotMatch(built.sql, /order_time >= DATE_SUB/)
   assert.match(built.sql, /other_inventory\.wsid <> grouped\.warehouse_id/)
   assert.match(built.sql, /ORDER BY COALESCE\(latest_warning\.update_time, latest_warning\.create_time\) DESC/)
   assert.match(built.sql, /oms_t_inventory_detail/)
@@ -76,19 +77,22 @@ test('归因查询只生成单条只读 SELECT，且不选出任何客户隐私�
 
   const historical = buildSoldoutAttributionQuery({ scope: 'historical' })
   assert.match(historical.sql, /soldout_time IS NOT NULL/)
+  assert.match(historical.sql, /order_time >= DATE_SUB\(NOW\(\), INTERVAL \? DAY\)/)
   assert.doesNotMatch(historical.sql, /COALESCE\(is_send, 0\) <> 1/)
+  assert.deepEqual(historical.values, [30, 20])
 })
 
 test('仓库维度查询不联表推断原因，仓库过滤会追加占位符', () => {
   const warehouse = buildSoldoutAttributionQuery({ group_by: 'warehouse' })
   assert.match(warehouse.sql, /COUNT\(DISTINCT sku\) AS SIGNED\) AS sku_count/)
   assert.doesNotMatch(warehouse.sql, /oms_t_inventory|early_warn_inventory_info/)
-  assert.deepEqual(warehouse.values, [30, 20])
+  assert.deepEqual(warehouse.values, [20])
 
   const filtered = buildSoldoutAttributionQuery({ group_by: 'sku', warehouse_id: 50, window_days: 7, top_n: 3 })
   assert.match(filtered.sql, /AND warehouse_id = \?/)
   assert.equal(filtered.sql.match(/warehouse_id = \?/g).length, 1)
-  assert.deepEqual(filtered.values, [7, 50, 3])
+  assert.doesNotMatch(filtered.sql, /order_time >= DATE_SUB/)
+  assert.deepEqual(filtered.values, [50, 3])
   assert.equal(filtered.meta.hasWarehouseFilter, true)
 })
 
@@ -179,9 +183,10 @@ test('缺货归因执行只读聚合查询，参数化传值并返回归因结�
     now: () => new Date(2026, 9, 6, 16, 40, 0),
   })
   assert.equal(calls.length, 1)
-  assert.deepEqual(calls[0].values, [30, 20])
-  assert.deepEqual(Object.keys(result), ['windowDays', 'groupBy', 'scope', 'generatedAt', 'groups', 'actionSummary', 'rows'])
+  assert.deepEqual(calls[0].values, [20])
+  assert.deepEqual(Object.keys(result), ['windowDays', 'timeRange', 'groupBy', 'scope', 'generatedAt', 'groups', 'actionSummary', 'rows'])
   assert.equal(result.windowDays, 30)
+  assert.equal(result.timeRange, 'all_active')
   assert.equal(result.scope, 'active')
   assert.equal(result.generatedAt, '2026-10-06 16:40:00')
   assert.equal(result.groups, 1)
@@ -214,7 +219,7 @@ test('缺货归因 Tool 从私有配置执行并渲染原因与依据', async ()
           normalizeAttributionRows([SKU_ROW]), 'sku', new Date(2026, 9, 6, 16, 40, 0),
         )
         return {
-          windowDays: 30, groupBy: 'sku', scope: 'active', generatedAt: '2026-10-06 16:40:00', groups: 1,
+          windowDays: 30, timeRange: 'all_active', groupBy: 'sku', scope: 'active', generatedAt: '2026-10-06 16:40:00', groups: 1,
           actionSummary: {
             scope: actionSummary.scope,
             byReason: actionSummary.byReason,
@@ -230,7 +235,7 @@ test('缺货归因 Tool 从私有配置执行并渲染原因与依据', async ()
     })
     const value = await tool.execute({ window_days: 30 }, { signal: new AbortController().signal })
     assert.equal(tool.name, 'database_soldout_attribution')
-    assert.deepEqual(tool.output.schema.required, ['windowDays', 'groupBy', 'scope', 'generatedAt', 'groups', 'actionSummary', 'rows'])
+    assert.deepEqual(tool.output.schema.required, ['windowDays', 'timeRange', 'groupBy', 'scope', 'generatedAt', 'groups', 'actionSummary', 'rows'])
     assert.equal(tool.parameters.additionalProperties, false)
     assert.deepEqual(tool.parameters.properties.group_by.enum, ['sku', 'warehouse'])
     assert.deepEqual(Object.keys(tool.output.schema.properties.rows.items.properties).filter(key => key.startsWith('container')).sort(), [
@@ -239,7 +244,7 @@ test('缺货归因 Tool 从私有配置执行并渲染原因与依据', async ()
     assert.deepEqual(dshToolValueViolations(tool.output.schema, value), [])
 
     const text = tool.output.render({}, value)[0].text
-    assert.match(text, /近 30 天缺货归因（当前待处理口径/)
+    assert.match(text, /全部当前待处理订单归因（按SKU 与仓库聚合/)
     assert.match(text, /FRG225-W @ HS-A\(50\)( \[P2\])?：缺货 82 行 \/ 77 单 \/ 82 件/)
     assert.match(text, /原因：发货仓可用 0；其他仓合计可用 102/)
     assert.match(text, /依据：发货仓可用 0；其他仓可用 102；预警预售量 137；预警未处理/)
@@ -271,11 +276,11 @@ test('缺货归因 Tool 不把驱动错误原文带出，空结果给出明确�
     error => !/secret|db\.internal|Access denied/i.test(error.message),
   )
 
-  const empty = tool.output.render({}, { windowDays: 7, groupBy: 'warehouse', scope: 'active', generatedAt: '', groups: 0, rows: [] })[0].text
-  assert.match(empty, /近 7 天没有发现符合缺货口径的订单记录/)
+  const empty = tool.output.render({}, { windowDays: 7, timeRange: 'all_active', groupBy: 'warehouse', scope: 'active', generatedAt: '', groups: 0, rows: [] })[0].text
+  assert.match(empty, /没有发现当前仍待处理的缺货订单记录/)
 
   const warehouseText = tool.output.render({}, {
-    windowDays: 30, groupBy: 'warehouse', scope: 'active', generatedAt: '', groups: 1,
+    windowDays: 30, timeRange: 'all_active', groupBy: 'warehouse', scope: 'active', generatedAt: '', groups: 1,
     rows: [{ warehouseId: 50, warehouseName: 'HS-A', skuCount: 84, soldoutRows: 284, orderCount: 265, quantitySum: 284, lastSoldoutTime: '' }],
   })[0].text
   assert.match(warehouseText, /HS-A\(50\)：缺货 284 行 \/ 265 单 \/ 284 件；涉及 SKU 84 个/)

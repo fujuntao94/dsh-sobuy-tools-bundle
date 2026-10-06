@@ -15,7 +15,7 @@
 
 - Tool：`database_list_tables`，只查询订单数据库的 `information_schema.tables`，统计基础表并读取 `TABLE_COMMENT`。
 - Tool：`database_describe_table`，只查询订单数据库的 `information_schema.columns`，返回指定表的字段名、类型、是否可空、键标记与字段备注。
-- Tool：`database_soldout_attribution`，近 N 天缺货归因分析，见下方专节。
+- Tool：`database_soldout_attribution`，全部当前待处理缺货归因或近 N 天历史复盘，见下方专节。
 - Tool：`database_dictionary_lookup`，字典目录 / 字典取值 / 编码翻译，含订单原因码（G 码），见下方专节。
 - Tool：`database_order_timeline`，按订单号返回单笔订单的完整操作流水，见下方专节。
 - Skill：`database-table-catalog`，回答表数量，并只列出表名和用途。
@@ -46,9 +46,9 @@ SQL 是代码内固定的聚合模板，模型只能选聚合维度和填参数�
 
 | 参数 | 取值 | 说明 |
 | --- | --- | --- |
-| `window_days` | 1–45，默认 30 | 窗口天数，**按订单下单时间筛选** |
+| `window_days` | 1–45，默认 30 | 仅 `historical` 使用：窗口天数，**按订单下单时间筛选**；`active` 忽略此参数 |
 | `group_by` | `sku`（默认）/ `warehouse` | `sku` 返回 SKU×仓库的归因；`warehouse` 只返回仓库维度分布 |
-| `scope` | `active`（默认）/ `historical` | `active` 只看未发货、未撤单、未取消的当前缺货队列；`historical` 用于复盘窗口内曾符合缺货口径的订单 |
+| `scope` | `active`（默认）/ `historical` | `active` 查全部未发货、未撤单、未取消的当前缺货队列，不限制下单时间；`historical` 用于复盘窗口内曾符合缺货口径的订单 |
 | `warehouse_id` | 可选整数 | 单仓下钻 |
 | `top_n` | 1–500，默认 20 | 按缺货行数倒序取前 N |
 
@@ -76,11 +76,11 @@ SQL 是代码内固定的聚合模板，模型只能选聚合维度和填参数�
 
 两条必须知道的口径限制：
 
-- 时间锚点是 `order_time` 而不是 `soldout_time`：`soldout_time` 无索引（表约 273 万行），且 `1A|06`、`1A|04` 这类状态的 `soldout_time` 为空，用它做窗口会漏掉整个“缺货处理中”队列。
+- 时间锚点是 `order_time` 而不是 `soldout_time`：`soldout_time` 无索引（表约 273 万行），且 `1A|06`、`1A|04` 这类状态的 `soldout_time` 为空，用它做窗口会漏掉整个“缺货处理中”队列。`active` 不使用时间窗口，以免漏掉长期未解决订单；`historical` 才按 `order_time` 限制窗口。
 - 库存是**当前快照**，不是缺货发生时的库存；货柜只取分组关联样本，相关判定有时效性。
-- 窗口上限 45 天：实测 7 天约 0.6s、30 天约 0.7s、45 天约 1.0s，但 60 天会跳到 13.9s 并撞上查询超时。
+- `historical` 窗口上限 45 天：实测 7 天约 0.6s、30 天约 0.7s、45 天约 1.0s，但 60 天会跳到 13.9s 并撞上查询超时。更久趋势应使用缺货快照对比，而不是无限扫描订单历史明细。
 
-固定归因查询不依赖业务表白名单，且不接受表名或 SQL 参数；查询只选出 SKU、仓库和数量，不含客户姓名、地址、电话或邮箱。
+固定归因查询不依赖业务表白名单，且不接受表名或 SQL 参数。MySQL 会先按 SKU×仓库聚合当前缺货订单，再关联已按相同维度聚合的库存明细、上架任务和预测数据；Tool 端只接收最终聚合结果，不拉取订单明细，也不含客户姓名、地址、电话或邮箱。
 
 SKU 维度结果按 P0–P3 待办优先级排序，并附带本次返回范围内按主因、仓库、责任人、影响等级、预测风险和缺货趋势的汇总。每条 SKU×仓库还会返回：
 

@@ -42,7 +42,6 @@ function rowLines(row, index) {
     row.shortageDays ? `   趋势：${row.shortageTrend || '新近'}缺货，窗口内涉及 ${row.shortageDays} 个下单日${row.overdueShipRows ? `；${row.overdueShipRows} 行已超过强制发货时间` : ''}` : null,
     `   依据：${evidence.join('；')}`,
     row.recoveryBasis ? `   恢复依据：${row.recoveryBasis}${row.recoveryEta ? ` 预计时间 ${row.recoveryEta}` : ''}` : null,
-    row.forecastRiskNote ? `   预测风险：${row.forecastRiskLabel || row.forecastRisk}；${row.forecastRiskNote}` : null,
     row.responsibleOwners ? `   责任人：${row.responsibleOwners}` : null,
     row.primaryAction ? `   建议：${row.primaryAction}` : null,
     row.contributingFactors?.length
@@ -59,7 +58,7 @@ export function createSoldoutAttributionTool({
 } = {}) {
   return {
     name: 'database_soldout_attribution',
-    description: `只读分析订单缺货情况：默认统计全部当前仍待处理的缺货订单，可按 SKU×仓库或仓库聚合；历史复盘才受时间窗口限制。对照当前库存、库存明细、库存预警、货柜、上架任务和当月预测，返回主因、并发因素、恢复依据、影响优先级和下一步动作。不接受 SQL，只返回 SKU、仓库和数量，不返回客户隐私字段。`,
+    description: `只读分析订单缺货情况：默认统计全部当前仍待处理的缺货订单，可按 SKU×仓库或仓库聚合；历史复盘才受时间窗口限制。对照当前库存、库存明细、库存预警、货柜和上架任务，返回主因、并发因素、分组证据、恢复依据、影响优先级和下一步动作。不接受 SQL，只返回 SKU、仓库和数量，不返回客户隐私字段。预测性缺货请使用 database_inventory_shortage_forecast。`,
     parameters: {
       type: 'object',
       additionalProperties: false,
@@ -100,14 +99,13 @@ export function createSoldoutAttributionTool({
           groups: { type: 'number', description: '本次返回的分组条数。' },
           actionSummary: {
             type: 'object', additionalProperties: false,
-            required: ['scope', 'byReason', 'byWarehouse', 'byOwner', 'byImpact', 'byForecastRisk', 'byTrend'],
+            required: ['scope', 'byReason', 'byWarehouse', 'byOwner', 'byImpact', 'byTrend'],
             properties: {
               scope: STRING,
               byReason: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['reason', 'groups', 'orderCount', 'quantitySum'], properties: { reason: STRING, groups: NUMBER, orderCount: NUMBER, quantitySum: NUMBER } } },
               byWarehouse: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['warehouse', 'groups', 'orderCount', 'quantitySum'], properties: { warehouse: STRING, groups: NUMBER, orderCount: NUMBER, quantitySum: NUMBER } } },
               byOwner: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['owner', 'groups', 'orderCount', 'quantitySum'], properties: { owner: STRING, groups: NUMBER, orderCount: NUMBER, quantitySum: NUMBER } } },
               byImpact: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['impact', 'groups', 'orderCount', 'quantitySum'], properties: { impact: STRING, groups: NUMBER, orderCount: NUMBER, quantitySum: NUMBER } } },
-              byForecastRisk: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['forecastRisk', 'groups', 'orderCount', 'quantitySum'], properties: { forecastRisk: STRING, groups: NUMBER, orderCount: NUMBER, quantitySum: NUMBER } } },
               byTrend: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['trend', 'groups', 'orderCount', 'quantitySum'], properties: { trend: STRING, groups: NUMBER, orderCount: NUMBER, quantitySum: NUMBER } } },
             },
           },
@@ -157,9 +155,7 @@ export function createSoldoutAttributionTool({
                 pendingTaskOwners: { type: 'string', description: '仅 group_by=sku 时返回，未完成上架任务的责任人。' },
                 oldestShelvingTaskCreatedAt: { type: 'string', description: '仅 group_by=sku 时返回，最早未完成上架任务创建时间。' },
                 pendingShelvingHours: { type: 'number', description: '仅 group_by=sku 时返回，最早未完成上架任务的等待小时数。' },
-                monthlyForecastQty: { type: 'number', description: '仅 group_by=sku 时返回，当月预测销量合计。' },
-                forecastOwners: { type: 'string', description: '仅 group_by=sku 时返回，当月预测记录责任人。' },
-                responsibleOwners: { type: 'string', description: '仅 group_by=sku 时返回，上架任务责任人与预测责任人的去重合并，仅作待办跟进线索。' },
+                responsibleOwners: { type: 'string', description: '仅 group_by=sku 时返回，未完成上架任务的去重责任人，仅作待办跟进线索。' },
                 warningPresellNum: { type: 'number', description: '仅 group_by=sku 时返回，库存预警的预售量。' },
                 warningCriticalValue: { type: 'number', description: '仅 group_by=sku 时返回，库存预警的临界值 A。' },
                 warningDealFlag: NUMBER,
@@ -185,11 +181,18 @@ export function createSoldoutAttributionTool({
                 recoveryStatus: { type: 'string', description: '仅 group_by=sku 时返回，当前恢复依据状态，不代表承诺的恢复结果。' },
                 recoveryEta: { type: 'string', description: '仅 group_by=sku 时返回，关联在途货柜的预计到库时间；空字符串表示当前没有可确认 ETA。' },
                 recoveryBasis: STRING,
-                forecastRisk: { type: 'string', description: '仅 group_by=sku 时返回，按当月预测销量与当前本仓可用库存计算的风险等级。' },
-                forecastRiskLabel: STRING,
-                forecastDailyQty: { type: 'number', description: '仅 group_by=sku 时返回，由当月预测销量折算的日均数量。' },
-                stockCoverDays: { type: 'number', description: '仅 group_by=sku 时返回，当前本仓可用库存按预测日均销量估算的覆盖天数。' },
-                forecastRiskNote: STRING,
+                evidence: {
+                  type: 'object', additionalProperties: false,
+                  description: '仅 group_by=sku 时返回，按数据来源归类的完整判定证据；顶层保留同名字段兼容既有调用。',
+                  required: ['shortage', 'inventory', 'warning', 'container', 'shelving'],
+                  properties: {
+                    shortage: { type: 'object', additionalProperties: false, required: ['oldestShortageTime', 'lastSoldoutTime', 'shortageDays', 'soldoutStateRows', 'processingRows', 'insufficientRows', 'presaleRows', 'overdueShipRows', 'earliestPlanPrintTime'], properties: { oldestShortageTime: STRING, lastSoldoutTime: STRING, shortageDays: NUMBER, soldoutStateRows: NUMBER, processingRows: NUMBER, insufficientRows: NUMBER, presaleRows: NUMBER, overdueShipRows: NUMBER, earliestPlanPrintTime: STRING } },
+                    inventory: { type: 'object', additionalProperties: false, required: ['localAvailable', 'localUsednum', 'localPresaleOccupied', 'localStockStatus', 'localStockUpdatedAt', 'otherWarehouseAvailable', 'transferCandidates'], properties: { localAvailable: NUMBER, localUsednum: NUMBER, localPresaleOccupied: NUMBER, localStockStatus: NUMBER, localStockUpdatedAt: STRING, otherWarehouseAvailable: NUMBER, transferCandidates: STRING } },
+                    warning: { type: 'object', additionalProperties: false, required: ['hasWarning', 'warningPresellNum', 'warningCriticalValue', 'warningDealFlag', 'warningCreateTime'], properties: { hasWarning: { type: 'boolean' }, warningPresellNum: NUMBER, warningCriticalValue: NUMBER, warningDealFlag: NUMBER, warningCreateTime: STRING } },
+                    container: { type: 'object', additionalProperties: false, required: ['sampleContainerNum', 'containerCount', 'containerEtaStore', 'containerAtaStore', 'containerPresaleExpire', 'containerPresaleStatus', 'containerLoadQty'], properties: { sampleContainerNum: STRING, containerCount: NUMBER, containerEtaStore: STRING, containerAtaStore: STRING, containerPresaleExpire: STRING, containerPresaleStatus: NUMBER, containerLoadQty: NUMBER } },
+                    shelving: { type: 'object', additionalProperties: false, required: ['pendingShelvingTasks', 'pendingTaskOwners', 'oldestShelvingTaskCreatedAt'], properties: { pendingShelvingTasks: NUMBER, pendingTaskOwners: STRING, oldestShelvingTaskCreatedAt: STRING } },
+                  },
+                },
                 waitHours: { type: 'number', description: '仅 group_by=sku 时返回，自最早缺货或下单时间起的等待小时数。' },
                 priority: { type: 'string', description: '仅 group_by=sku 时返回，P0 至 P3 的待办优先级。' },
                 priorityScore: { type: 'number', description: '仅 group_by=sku 时返回，用于待办排序的内部评分。' },
@@ -217,7 +220,7 @@ export function createSoldoutAttributionTool({
           impactSummary,
           ...value.rows.flatMap((row, index) => rowLines(row, index)),
           value.groupBy === 'sku'
-            ? '注意：主因、并发因素、影响等级、恢复依据和预测风险均基于当前库存、预警、货柜、上架任务与预测数据推断，不是数据库中的原因字段；库存为当前快照，货柜仅使用关联样本。'
+            ? '注意：主因、并发因素、影响等级和恢复依据均基于当前库存、预警、货柜与上架任务推断，不是数据库中的原因字段；库存为当前快照，货柜仅使用关联样本。预测性缺货请使用 database_inventory_shortage_forecast。'
             : '注意：仓库维度不推断原因，只反映缺货分布；需要原因请改用 group_by=sku。',
         ].join('\n')
         return [{ type: 'text', text }]

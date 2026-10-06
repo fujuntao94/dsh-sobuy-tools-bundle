@@ -7,7 +7,7 @@
  * 表现就是插件列表里显示「启用失败」，且不只是一个工具不可用。
  *
  * 真实事故：`type: ['number', 'null']` 这类**联合类型数组**会让整个数据库组件
- * （6 个工具）一起激活失败，报错原文：
+ * （多个工具）一起激活失败，报错原文：
  *   schema.properties.filters.properties.dictId.type must be a single type string
  *   (type arrays are not supported)
  *

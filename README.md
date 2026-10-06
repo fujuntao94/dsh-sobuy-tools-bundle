@@ -25,10 +25,13 @@ Desktop 中会显示飞书和数据库两个设置项。数据库设置页监听
 同时内置 `database-security-check` Skill，用于检查账号只读状态和查询安全策略。
 
 数据库组件还提供 `database_soldout_attribution` Tool 与 `database-soldout-attribution` Skill：
-默认按近 N 天（上限 45 天）聚合当前待处理的缺货 SKU 与仓库；可切换历史复盘口径，并对照当前库存、库存明细、预警和关联货柜输出主因、并发因素与建议动作。
+默认聚合**全部当前待处理**的缺货 SKU 与仓库；可切换近 N 天（上限 45 天）历史复盘口径，并对照当前库存、库存明细、预警、关联货柜和上架任务输出主因、并发因素、分组证据与建议动作。
 SQL 为代码内固定模板，模型只能选聚合维度与填参数，不接受 SQL 字符串；固定读取
 `oms_t_orders_tracking`、`oms_t_inventory`、`oms_t_inventory_detail`、`early_warn_inventory_info`、
 `bas_t_container`、`bas_t_container_sku` 和 `bas_t_work_stock`，不要求手工配置业务表白名单。
+
+`database_inventory_shortage_forecast` 专门回答“还未缺货但即将断货”：它只聚合
+`report_t_predict_sku` 当前月预测销量与 `oms_t_inventory` 当前库存，输出库存覆盖天数、缺口、候选调拨库存、预测责任人和建议动作，不扫描订单缺货明细。
 
 `database_soldout_snapshot_capture` 会从上述只读查询采集当前待处理缺货队列并保存到插件私有目录；
 `database_soldout_snapshot_compare` 比较最近两份快照。两者都不会向 OMS 写数据。

@@ -89,6 +89,7 @@ const targets = [
   ['components/database/src/runtime/tools/list-tables-tool.js', 'registerListTablesTool', {}],
   ['components/database/src/runtime/tools/describe-table-tool.js', 'registerDescribeTableTool', {}],
   ['components/database/src/runtime/tools/soldout-attribution-tool.js', 'registerSoldoutAttributionTool', {}],
+  ['components/database/src/runtime/tools/inventory-shortage-forecast-tool.js', 'registerInventoryShortageForecastTool', {}],
   ['components/database/src/runtime/tools/dictionary-tool.js', 'registerDictionaryTool', {}],
   ['components/database/src/runtime/tools/order-timeline-tool.js', 'registerOrderTimelineTool', {}],
   ['components/database/src/runtime/tools/security-check-tool.js', 'registerSecurityCheckTool', { securityService: {} }],
@@ -129,6 +130,7 @@ if (live) {
     const config = JSON.parse(fs.readFileSync(configPath, 'utf8'))
     const { runDictionaryLookup } = await import(path.join(repoRoot, 'components/database/src/domains/dictionary.js'))
     const { runSoldoutAttribution } = await import(path.join(repoRoot, 'components/database/src/domains/soldout-attribution.js'))
+    const { runInventoryShortageForecast } = await import(path.join(repoRoot, 'components/database/src/domains/inventory-shortage-forecast.js'))
     const byName = new Map(captured.map(definition => [definition.name, definition]))
     const checks = [
       ['database_dictionary_lookup', '字典目录（全部筛选为空）', () => runDictionaryLookup(config, {})],
@@ -137,6 +139,7 @@ if (live) {
       ['database_dictionary_lookup', '按 keyword 模糊匹配', () => runDictionaryLookup(config, { keyword: '投递' })],
       ['database_soldout_attribution', '缺货归因（按 SKU）', () => runSoldoutAttribution(config, { window_days: 30, top_n: 5 })],
       ['database_soldout_attribution', '缺货归因（按仓库）', () => runSoldoutAttribution(config, { window_days: 30, group_by: 'warehouse', top_n: 5 })],
+      ['database_inventory_shortage_forecast', '预测性缺货预警', () => runInventoryShortageForecast(config, { coverage_days: 14, top_n: 5 })],
     ]
     for (const [name, label, run] of checks) {
       const value = await run()

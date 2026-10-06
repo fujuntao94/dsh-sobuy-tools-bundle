@@ -37,7 +37,6 @@ const SKU_ROW = {
   container_eta_store: '2026-10-10 08:00:00', container_ata_store: null,
   container_presale_expire: '2026-10-09 23:59:59', container_presale_status: 1, container_load_qty: 200,
   pending_shelving_tasks: 0, pending_task_owners: '', oldest_shelving_task_created_at: null,
-  monthly_forecast_qty: 300, forecast_owners: '李四',
 }
 
 test('缺货归因参数只接受白名单字段，默认只看当前待处理的订单', () => {
@@ -71,9 +70,8 @@ test('归因查询只生成单条只读 SELECT，且不选出任何客户隐私�
   assert.match(built.sql, /ORDER BY COALESCE\(latest_warning\.update_time, latest_warning\.create_time\) DESC/)
   assert.match(built.sql, /oms_t_inventory_detail/)
   assert.match(built.sql, /bas_t_container_sku/)
-  assert.match(built.sql, /report_t_predict_sku/)
   assert.match(built.sql, /overdue_ship_rows/)
-  assert.match(built.sql, /monthly_forecast_qty/)
+  assert.doesNotMatch(built.sql, /report_t_predict_sku|monthly_forecast_qty/)
 
   const historical = buildSoldoutAttributionQuery({ scope: 'historical' })
   assert.match(historical.sql, /soldout_time IS NOT NULL/)
@@ -148,8 +146,12 @@ test('行归一化把聚合结果转成结构化字段并挂上归因', () => {
   assert.equal(rows[0].shortageDays, 4)
   assert.equal(rows[0].overdueShipRows, 1)
   assert.equal(rows[0].containerLoadQty, 200)
-  assert.equal(rows[0].monthlyForecastQty, 300)
-  assert.equal(rows[0].forecastOwners, '李四')
+  assert.deepEqual(rows[0].evidence.inventory, {
+    localAvailable: 0, localUsednum: 0, localPresaleOccupied: 0, localStockStatus: 0, localStockUpdatedAt: '',
+    otherWarehouseAvailable: 102, transferCandidates: '',
+  })
+  assert.equal(rows[0].evidence.warning.hasWarning, true)
+  assert.equal(rows[0].evidence.container.containerLoadQty, 200)
   assert.equal(rows[1].attribution, 'local_stock_resolved')
   assert.equal(rows[1].localAvailable, 5)
   assert.equal(normalizeAttributionRows([{ ...SKU_ROW, soldout_rows: 2, shipped_rows: 2 }], 'sku', 'historical')[0].currentState, 'recovered_or_closed')
@@ -196,11 +198,10 @@ test('缺货归因执行只读聚合查询，参数化传值并返回归因结�
   assert.equal(result.rows[0].shortageTrend, '反复')
   assert.equal(result.rows[0].recoveryStatus, 'container_in_transit')
   assert.equal(result.rows[0].recoveryEta, '2026-10-10 08:00:00')
-  assert.equal(result.rows[0].forecastRisk, 'high')
-  assert.equal(result.rows[0].responsibleOwners, '李四')
+  assert.equal(result.rows[0].responsibleOwners, '')
+  assert.equal(result.rows[0].evidence.shortage.overdueShipRows, 1)
   assert.equal(result.actionSummary.byReason[0].quantitySum, 82)
   assert.equal(result.actionSummary.byImpact[0].impact, '紧急')
-  assert.equal(result.actionSummary.byForecastRisk[0].forecastRisk, '高风险')
   assert.equal(result.actionSummary.byTrend[0].trend, '反复')
   assert.equal(ended, true)
   assert.deepEqual(CONFIG.allowedTables, [], '固定缺货归因不依赖业务表白名单')
@@ -226,7 +227,6 @@ test('缺货归因 Tool 从私有配置执行并渲染原因与依据', async ()
             byWarehouse: actionSummary.byWarehouse,
             byOwner: actionSummary.byOwner,
             byImpact: actionSummary.byImpact,
-            byForecastRisk: actionSummary.byForecastRisk,
             byTrend: actionSummary.byTrend,
           },
           rows: actionSummary.queue,
@@ -251,8 +251,6 @@ test('缺货归因 Tool 从私有配置执行并渲染原因与依据', async ()
     assert.match(text, /影响：紧急；已有 1 行超过强制发货时间/)
     assert.match(text, /趋势：反复缺货，窗口内涉及 4 个下单日；1 行已超过强制发货时间/)
     assert.match(text, /恢复依据：关联货柜尚未实际到库，该 SKU 装柜量 200。 预计时间 2026-10-10 08:00:00/)
-    assert.match(text, /预测风险：高风险；按本月预测日均 10 件计算，当前可用库存仅覆盖约 0 天/)
-    assert.match(text, /责任人：李四/)
     assert.match(text, /建议：优先核实候选仓可调拨性/)
     assert.match(text, /并发因素：预售占用可发库存；关联预售货柜尚未到库；库存预警尚未处理/)
     assert.match(text, /不是数据库中的原因字段/)
@@ -302,6 +300,7 @@ test('缺货归因 Tool 与 Skill 通过 DSH 运行时注册', () => {
   assert.equal(skills[0].source, 'bundled')
   assert.deepEqual(skills[0].invocation, { modelInvocable: true, userInvocable: true })
   assert.match(skills[0].content, /database_soldout_attribution/)
+  assert.match(skills[0].content, /database_inventory_shortage_forecast/)
   assert.match(skills[0].content, /不是数据库里读出来的字段/)
   assert.match(skills[0].content, /时间锚点是订单下单时间/)
   assert.equal(skills[0].content.startsWith('---'), false)

@@ -4,6 +4,7 @@ import { createDatabaseSetupServer } from './src/setup-page.js'
 import { registerListTablesTool } from './src/runtime/tools/list-tables-tool.js'
 import { registerDescribeTableTool } from './src/runtime/tools/describe-table-tool.js'
 import { registerSoldoutAttributionTool } from './src/runtime/tools/soldout-attribution-tool.js'
+import { registerInventoryShortageForecastTool } from './src/runtime/tools/inventory-shortage-forecast-tool.js'
 import { registerSoldoutSnapshotTools } from './src/runtime/tools/soldout-snapshot-tool.js'
 import { registerDictionaryTool } from './src/runtime/tools/dictionary-tool.js'
 import { registerOrderTimelineTool } from './src/runtime/tools/order-timeline-tool.js'
@@ -54,6 +55,7 @@ export function apply(ctx, config = {}) {
   registerListTablesTool(ctx, { ...options, auditLogger })
   registerDescribeTableTool(ctx, { ...options, auditLogger })
   registerSoldoutAttributionTool(ctx, { ...options, auditLogger })
+  registerInventoryShortageForecastTool(ctx, { ...options, auditLogger })
   registerSoldoutSnapshotTools(ctx, { ...options, auditLogger })
   registerDictionaryTool(ctx, { ...options, auditLogger })
   registerOrderTimelineTool(ctx, { ...options, auditLogger })

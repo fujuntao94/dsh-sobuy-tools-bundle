@@ -16,6 +16,7 @@
 - Tool：`database_list_tables`，只查询订单数据库的 `information_schema.tables`，统计基础表并读取 `TABLE_COMMENT`。
 - Tool：`database_describe_table`，只查询订单数据库的 `information_schema.columns`，返回指定表的字段名、类型、是否可空、键标记与字段备注。
 - Tool：`database_soldout_attribution`，全部当前待处理缺货归因或近 N 天历史复盘，见下方专节。
+- Tool：`database_inventory_shortage_forecast`，按当前月预测销量和当前库存发现尚未缺货但即将断货的 SKU×仓库，见下方专节。
 - Tool：`database_dictionary_lookup`，字典目录 / 字典取值 / 编码翻译，含订单原因码（G 码），见下方专节。
 - Tool：`database_order_timeline`，按订单号返回单笔订单的完整操作流水，见下方专节。
 - Skill：`database-table-catalog`，回答表数量，并只列出表名和用途。
@@ -28,7 +29,7 @@
 ## 改这个组件的工具 schema 前必读
 
 宿主的 `tools.register()` 会对 `output.schema` 强制校验，不合规就抛 `JsonSchemaError`；
-该异常发生在**组件激活阶段**，所以一个字段写错会让本组件全部 6 个工具一起「启用失败」。
+该异常发生在**组件激活阶段**，所以一个字段写错会让本组件全部工具一起「启用失败」。
 已发生过一次：`filters` 里的 `type: ['number', 'null']`（联合类型数组不被支持）。
 
 - 可空字段用 `nullableSchema(type, description)`（来自 `sobuy-plugin-core/schema`），
@@ -52,14 +53,13 @@ SQL 是代码内固定的聚合模板，模型只能选聚合维度和填参数�
 | `warehouse_id` | 可选整数 | 单仓下钻 |
 | `top_n` | 1–500，默认 20 | 按缺货行数倒序取前 N |
 
-三个数据源与用途：
+归因数据源与用途：
 
 - `oms_t_orders_tracking`：缺货行（`soldout_time` 非空，或状态为 `3D|3D` 已断货、`1A|06` 订单缺货处理、`1A|04` 库存不足、`1A|2C` 预售），且必须 `valid = 1`。
 - `oms_t_inventory`、`oms_t_inventory_detail`：比对发货仓与其他仓的**当前**可用库存、现货占用和明细预售占用。
 - `early_warn_inventory_info`：按 SKU×仓库匹配**最新有效**库存预警的预售量、临界值与处理状态（`is_delete = 0`）。
 - `bas_t_container`、`bas_t_container_sku`：用订单关联货柜样本补充预售货柜的预计/实际到库状态。
 - `bas_t_work_stock`：匹配未完成的预售/现货上架任务、责任人及最早任务创建时间。
-- `report_t_predict_sku`：匹配当前自然月的 SKU×仓库预测销量与预测责任人；用当前本仓可用库存折算预测覆盖天数。
 
 `attribution` 是对上述证据的主因推断；`contributingFactors` 保留并发因素；`primaryAction` 和 `recommendedActions` 提供下一步动作。它们均不是数据库中的原因字段。
 
@@ -80,16 +80,30 @@ SQL 是代码内固定的聚合模板，模型只能选聚合维度和填参数�
 - 库存是**当前快照**，不是缺货发生时的库存；货柜只取分组关联样本，相关判定有时效性。
 - `historical` 窗口上限 45 天：实测 7 天约 0.6s、30 天约 0.7s、45 天约 1.0s，但 60 天会跳到 13.9s 并撞上查询超时。更久趋势应使用缺货快照对比，而不是无限扫描订单历史明细。
 
-固定归因查询不依赖业务表白名单，且不接受表名或 SQL 参数。MySQL 会先按 SKU×仓库聚合当前缺货订单，再关联已按相同维度聚合的库存明细、上架任务和预测数据；Tool 端只接收最终聚合结果，不拉取订单明细，也不含客户姓名、地址、电话或邮箱。
+固定归因查询不依赖业务表白名单，且不接受表名或 SQL 参数。MySQL 会先按 SKU×仓库聚合当前缺货订单，再关联已按相同维度聚合的库存明细、上架任务等证据；Tool 端只接收最终聚合结果，不拉取订单明细，也不含客户姓名、地址、电话或邮箱。
 
-SKU 维度结果按 P0–P3 待办优先级排序，并附带本次返回范围内按主因、仓库、责任人、影响等级、预测风险和缺货趋势的汇总。每条 SKU×仓库还会返回：
+SKU 维度结果按 P0–P3 待办优先级排序，并附带本次返回范围内按主因、仓库、责任人、影响等级和缺货趋势的汇总。每条 SKU×仓库还会返回：
 
 - `impactLevel` / `impactNote`：由强制发货是否超时、等待时长及受影响订单/数量推断的影响等级；它不是订单金额优先级，也没有跨币种金额加总。
 - `recoveryStatus` / `recoveryBasis` / `recoveryEta`：当前库存、关联在途货柜或上架任务提供的恢复线索；只有货柜预计到库时间会作为 ETA，不能据此承诺恢复结果。
 - `shortageDays` / `shortageTrend`：窗口内有缺货订单的不同下单日期数量及“新近/反复/持续”分组；它不是严格连续断货天数。
-- `forecastRisk` / `stockCoverDays`：用**当前**本仓可用库存与当前自然月预测销量估算的预警风险；缺预测数据时明确返回“无预测数据”，不臆造销量。
+- `evidence`：按 `shortage`、`inventory`、`warning`、`container`、`shelving` 五组完整返回判定依据；顶层原有字段继续保留兼容性。
 
 `historical` 口径还会通过 `currentState` 标示该分组当前是 `active`、`recovered_or_closed` 还是 `mixed`。
+
+## 预测性缺货预警（`database_inventory_shortage_forecast`）
+
+这个 Tool 只回答“**还未缺货，但按当前月预测销量可能即将断货**”，不会扫描订单明细，也不代替订单缺货归因。
+
+| 参数 | 取值 | 说明 |
+| --- | --- | --- |
+| `coverage_days` | 1–90，默认 14 | 只返回当前库存覆盖天数低于该阈值的 SKU×仓库 |
+| `warehouse_id` | 可选整数 | 只预警指定仓库 |
+| `top_n` | 1–500，默认 20 | 返回条数上限 |
+
+固定读取 `report_t_predict_sku` 当前自然月预测销量与责任人、`oms_t_inventory` 当前库存。MySQL 内部先按 SKU×仓库聚合预测和库存，再按覆盖天数过滤；返回月预测量、预测日均量、本仓可用/占用、库存更新时间、覆盖天数、达到阈值仍需补足的数量、其他仓候选库存、预测责任人和建议动作。
+
+覆盖天数只是“当前库存 ÷ 当前月预测日均销量”的估算，不代表采购到货承诺；其他仓库存也只表示候选调拨量。
 
 ## 缺货快照
 

@@ -35,6 +35,7 @@ async function collectToolDefinitions() {
     ['../components/database/src/runtime/tools/list-tables-tool.js', 'registerListTablesTool', {}],
     ['../components/database/src/runtime/tools/describe-table-tool.js', 'registerDescribeTableTool', {}],
     ['../components/database/src/runtime/tools/soldout-attribution-tool.js', 'registerSoldoutAttributionTool', {}],
+    ['../components/database/src/runtime/tools/inventory-shortage-forecast-tool.js', 'registerInventoryShortageForecastTool', {}],
     ['../components/database/src/runtime/tools/dictionary-tool.js', 'registerDictionaryTool', {}],
     ['../components/database/src/runtime/tools/order-timeline-tool.js', 'registerOrderTimelineTool', {}],
     ['../components/database/src/runtime/tools/security-check-tool.js', 'registerSecurityCheckTool', { securityService: {} }],
@@ -57,7 +58,7 @@ const definitions = await collectToolDefinitions()
 const merged = new Map(definitions.map(definition => [definition.name, definition]))
 
 test('两个组件的工具都被注册到，且没有重名', () => {
-  assert.equal(definitions.length, 12)
+  assert.equal(definitions.length, 13)
   assert.equal(merged.size, definitions.length)
 })
 

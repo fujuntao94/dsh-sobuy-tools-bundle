@@ -21,12 +21,11 @@ const WARNING_TABLE = 'early_warn_inventory_info'
 const CONTAINER_TABLE = 'bas_t_container'
 const CONTAINER_SKU_TABLE = 'bas_t_container_sku'
 const WORK_STOCK_TABLE = 'bas_t_work_stock'
-const PREDICT_SKU_TABLE = 'report_t_predict_sku'
 
 /** 缺货归因只读固定来源表；调用方不能传入表名或 SQL。 */
 export const SOLD_OUT_ATTRIBUTION_TABLES = Object.freeze([
   TRACKING_TABLE, INVENTORY_TABLE, INVENTORY_DETAIL_TABLE, WARNING_TABLE,
-  CONTAINER_TABLE, CONTAINER_SKU_TABLE, WORK_STOCK_TABLE, PREDICT_SKU_TABLE,
+  CONTAINER_TABLE, CONTAINER_SKU_TABLE, WORK_STOCK_TABLE,
 ])
 
 export const DEFAULT_WINDOW_DAYS = 30
@@ -41,7 +40,9 @@ export const ATTRIBUTION_SCOPES = Object.freeze(['active', 'historical'])
 export const ATTRIBUTION_LABELS = Object.freeze({
   local_stock_resolved: '发货仓当前已有可用库存',
   warehouse_allocation_gap: '发货仓无货、其他仓有候选调拨库存',
+  local_stock_occupied: '本仓现货已被占用',
   presale_occupation: '预售占用可发库存',
+  container_in_transit: '关联预售货柜尚未到库',
   shelving_pending: '现货或预售上架任务未完成',
   warning_unhandled: '库存预警已触发但未处理',
   genuine_shortage: '真实缺货（各仓均无可用）',
@@ -210,9 +211,7 @@ SELECT
   CAST(COALESCE(container_sku.load_qty, 0) AS SIGNED) AS container_load_qty,
   CAST(COALESCE(work_stock.pending_shelving_tasks, 0) AS SIGNED) AS pending_shelving_tasks,
   COALESCE(work_stock.pending_task_owners, '') AS pending_task_owners,
-  DATE_FORMAT(work_stock.oldest_shelving_task_created_at, '%Y-%m-%d %H:%i:%s') AS oldest_shelving_task_created_at,
-  CAST(COALESCE(predict.monthly_forecast_qty, 0) AS SIGNED) AS monthly_forecast_qty,
-  COALESCE(predict.forecast_owners, '') AS forecast_owners
+  DATE_FORMAT(work_stock.oldest_shelving_task_created_at, '%Y-%m-%d %H:%i:%s') AS oldest_shelving_task_created_at
 FROM (
   SELECT
     sku,
@@ -262,18 +261,6 @@ LEFT JOIN (
     AND type IN (1, 3)
   GROUP BY sku, warehouse_id
 ) work_stock ON work_stock.sku = grouped.sku AND work_stock.warehouse_id = grouped.warehouse_id
-LEFT JOIN (
-  SELECT
-    sku,
-    warehouse_id,
-    CAST(SUM(COALESCE(num, 0)) AS SIGNED) AS monthly_forecast_qty,
-    LEFT(GROUP_CONCAT(DISTINCT NULLIF(duty_user_name, '') ORDER BY duty_user_name SEPARATOR '、'), 300) AS forecast_owners
-  FROM ${PREDICT_SKU_TABLE}
-  WHERE COALESCE(is_delete, 0) = 0
-    AND CAST(predict_year AS UNSIGNED) = YEAR(CURDATE())
-    AND CAST(predict_month AS UNSIGNED) = MONTH(CURDATE())
-  GROUP BY sku, warehouse_id
-) predict ON predict.sku = grouped.sku AND predict.warehouse_id = grouped.warehouse_id
 ORDER BY grouped.soldout_rows DESC, grouped.quantity_sum DESC
 LIMIT ?`
     : `
@@ -412,13 +399,57 @@ function normalizeBySkuRow(row) {
     pendingShelvingTasks: toInt(row.pending_shelving_tasks),
     pendingTaskOwners: toStringValue(row.pending_task_owners),
     oldestShelvingTaskCreatedAt: toStringValue(row.oldest_shelving_task_created_at),
-    monthlyForecastQty: toInt(row.monthly_forecast_qty),
-    forecastOwners: toStringValue(row.forecast_owners),
     shortageDays: toInt(row.shortage_days),
     overdueShipRows: toInt(row.overdue_ship_rows),
     earliestPlanPrintTime: toStringValue(row.earliest_plan_print_time),
   }
-  return { ...common, ...classifyAttribution(row) }
+  return {
+    ...common,
+    evidence: {
+      shortage: {
+        oldestShortageTime: common.oldestShortageTime,
+        lastSoldoutTime: common.lastSoldoutTime,
+        shortageDays: common.shortageDays,
+        soldoutStateRows: common.soldoutStateRows,
+        processingRows: common.processingRows,
+        insufficientRows: common.insufficientRows,
+        presaleRows: common.presaleRows,
+        overdueShipRows: common.overdueShipRows,
+        earliestPlanPrintTime: common.earliestPlanPrintTime,
+      },
+      inventory: {
+        localAvailable: common.localAvailable,
+        localUsednum: common.localUsednum,
+        localPresaleOccupied: common.localPresaleOccupied,
+        localStockStatus: common.localStockStatus,
+        localStockUpdatedAt: common.localStockUpdatedAt,
+        otherWarehouseAvailable: common.otherWarehouseAvailable,
+        transferCandidates: common.transferCandidates,
+      },
+      warning: {
+        hasWarning: common.hasWarning,
+        warningPresellNum: common.warningPresellNum,
+        warningCriticalValue: common.warningCriticalValue,
+        warningDealFlag: common.warningDealFlag,
+        warningCreateTime: common.warningCreateTime,
+      },
+      container: {
+        sampleContainerNum: common.sampleContainerNum,
+        containerCount: common.containerCount,
+        containerEtaStore: common.containerEtaStore,
+        containerAtaStore: common.containerAtaStore,
+        containerPresaleExpire: common.containerPresaleExpire,
+        containerPresaleStatus: common.containerPresaleStatus,
+        containerLoadQty: common.containerLoadQty,
+      },
+      shelving: {
+        pendingShelvingTasks: common.pendingShelvingTasks,
+        pendingTaskOwners: common.pendingTaskOwners,
+        oldestShelvingTaskCreatedAt: common.oldestShelvingTaskCreatedAt,
+      },
+    },
+    ...classifyAttribution(row),
+  }
 }
 
 function normalizeByWarehouseRow(row) {
@@ -539,18 +570,6 @@ function recovery(row, now) {
   return { status: 'unknown', eta: '', pendingShelvingHours: taskWaitHours, basis: '当前表中没有可确认的到货或上架完成时间。' }
 }
 
-function forecastRisk(row) {
-  const monthlyForecastQty = toInt(row.monthlyForecastQty)
-  if (monthlyForecastQty <= 0) {
-    return { level: 'unknown', label: '无预测数据', dailyQty: 0, stockCoverDays: 0, note: '当前月份未匹配到有效预测销量，无法计算库存覆盖天数。' }
-  }
-  const dailyQty = Math.max(1, Math.ceil(monthlyForecastQty / 30))
-  const stockCoverDays = Math.floor(Math.max(0, toInt(row.localAvailable)) / dailyQty)
-  if (stockCoverDays < 7) return { level: 'high', label: '高风险', dailyQty, stockCoverDays, note: `按本月预测日均 ${dailyQty} 件计算，当前可用库存仅覆盖约 ${stockCoverDays} 天。` }
-  if (stockCoverDays < 14) return { level: 'medium', label: '中风险', dailyQty, stockCoverDays, note: `按本月预测日均 ${dailyQty} 件计算，当前可用库存约覆盖 ${stockCoverDays} 天。` }
-  return { level: 'low', label: '低风险', dailyQty, stockCoverDays, note: `按本月预测日均 ${dailyQty} 件计算，当前可用库存约覆盖 ${stockCoverDays} 天。` }
-}
-
 function summarize(rows, key, label) {
   const groups = new Map()
   for (const row of rows) {
@@ -566,14 +585,13 @@ function summarize(rows, key, label) {
 
 export function buildAttributionActionSummary(rows = [], groupBy = 'sku', now = new Date()) {
   if (groupBy !== 'sku') {
-    return { scope: 'returned_rows', byReason: [], byWarehouse: [], byOwner: [], byImpact: [], byForecastRisk: [], byTrend: [] }
+    return { scope: 'returned_rows', byReason: [], byWarehouse: [], byOwner: [], byImpact: [], byTrend: [] }
   }
   const queue = rows.map(row => {
     const waitHours = ageHours(row.oldestShortageTime, now)
     const impactResult = impact(row, waitHours)
     const recoveryResult = recovery(row, now)
-    const forecastResult = forecastRisk(row)
-    const owners = joinOwners(row.pendingTaskOwners, row.forecastOwners)
+    const owners = joinOwners(row.pendingTaskOwners)
     const score = ((PRIORITY_WEIGHTS[row.attribution] || 0) * 1000000)
       + (impactResult.score * 10000)
       + (Math.min(waitHours, 9999) * 100)
@@ -589,11 +607,6 @@ export function buildAttributionActionSummary(rows = [], groupBy = 'sku', now = 
       recoveryEta: recoveryResult.eta,
       recoveryBasis: recoveryResult.basis,
       pendingShelvingHours: recoveryResult.pendingShelvingHours,
-      forecastRisk: forecastResult.level,
-      forecastRiskLabel: forecastResult.label,
-      forecastDailyQty: forecastResult.dailyQty,
-      stockCoverDays: forecastResult.stockCoverDays,
-      forecastRiskNote: forecastResult.note,
       responsibleOwners: owners,
       priority: priorityLevel(row.attribution),
       priorityScore: score,
@@ -605,7 +618,6 @@ export function buildAttributionActionSummary(rows = [], groupBy = 'sku', now = 
     byWarehouse: summarize(queue, row => `${row.warehouseName}(${row.warehouseId})`, 'warehouse'),
     byOwner: summarize(queue, row => row.responsibleOwners, 'owner'),
     byImpact: summarize(queue, row => row.impactLabel, 'impact'),
-    byForecastRisk: summarize(queue, row => row.forecastRiskLabel, 'forecastRisk'),
     byTrend: summarize(queue, row => row.shortageTrend, 'trend'),
     queue,
   }
@@ -639,7 +651,6 @@ export async function runSoldoutAttribution(config, input = {}, {
       byWarehouse: actionSummary.byWarehouse,
       byOwner: actionSummary.byOwner,
       byImpact: actionSummary.byImpact,
-      byForecastRisk: actionSummary.byForecastRisk,
       byTrend: actionSummary.byTrend,
     },
     rows: actionSummary.queue || normalized,

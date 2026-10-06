@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import test from 'node:test'
 import {
   MAX_WINDOW_DAYS,
+  LEGACY_SOLD_OUT_ATTRIBUTION_TABLES,
   SOLD_OUT_ATTRIBUTION_TABLES,
   assertAttributionTablesAllowed,
   buildSoldoutAttributionQuery,
@@ -12,6 +13,7 @@ import {
   normalizeAttributionParams,
   normalizeAttributionRows,
   runSoldoutAttribution,
+  upgradeLegacyAttributionAllowlist,
 } from '../src/domains/soldout-attribution.js'
 import { createSoldoutAttributionTool, registerSoldoutAttributionTool } from '../src/runtime/tools/soldout-attribution-tool.js'
 import { registerSoldoutAttributionSkill } from '../src/runtime/skills/soldout-attribution-skill.js'
@@ -102,6 +104,14 @@ test('缺货归因要求所有来源表全部在白名单内，缺哪张就报�
   assert.throws(() => assertAttributionTablesAllowed({ ...CONFIG, allowedTables: ['oms_t_orders_tracking'] }),
     /oms_t_inventory、oms_t_inventory_detail、early_warn_inventory_info、bas_t_container、bas_t_container_sku/)
   assert.doesNotThrow(() => assertAttributionTablesAllowed(CONFIG))
+})
+
+test('已启用旧版缺货归因的白名单会补齐固定新增来源表，其他白名单不自动扩大', () => {
+  const migrated = upgradeLegacyAttributionAllowlist({ allowedTables: [...LEGACY_SOLD_OUT_ATTRIBUTION_TABLES, 'custom_report'] })
+  assert.deepEqual(migrated.allowedTables, [...SOLD_OUT_ATTRIBUTION_TABLES, 'custom_report'])
+  assert.doesNotThrow(() => assertAttributionTablesAllowed(migrated))
+  assert.deepEqual(upgradeLegacyAttributionAllowlist({ allowedTables: ['oms_t_orders_tracking'] }).allowedTables, ['oms_t_orders_tracking'])
+  assert.deepEqual(upgradeLegacyAttributionAllowlist({ allowedTables: [] }).allowedTables, [])
 })
 
 test('缺货原因返回主因、并发因素和下一步动作', () => {

@@ -1,6 +1,6 @@
 {
   "name": "sobuy-database-tools",
-  "version": "0.1.31",
+  "version": "0.1.32",
   "description": "Read-only table catalog and query safety checks for the Sobuy order database.",
   "type": "module",
   "main": "./index.js",

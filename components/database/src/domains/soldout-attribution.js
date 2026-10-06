@@ -28,6 +28,36 @@ export const SOLD_OUT_ATTRIBUTION_TABLES = Object.freeze([
   CONTAINER_TABLE, CONTAINER_SKU_TABLE, WORK_STOCK_TABLE,
 ])
 
+/**
+ * 0.1.31 之前的缺货归因只依赖这三张表。升级后新增的表仍然只被固定 SQL 模板
+ * 使用；识别到完整旧配置时，兼容性迁移会补齐新增来源表，避免用户手工修改白名单。
+ */
+export const LEGACY_SOLD_OUT_ATTRIBUTION_TABLES = Object.freeze([
+  TRACKING_TABLE, INVENTORY_TABLE, WARNING_TABLE,
+])
+
+/**
+ * 只迁移“已经明确启用过旧版缺货归因”的白名单，绝不把空白或任意自定义白名单
+ * 自动扩大。这样既能兼容历史配置，也保留白名单作为用户设置的安全边界。
+ */
+export function upgradeLegacyAttributionAllowlist(config) {
+  if (!config || !Array.isArray(config.allowedTables)) return config
+  const allowedTables = config.allowedTables.map(table => String(table).trim()).filter(Boolean)
+  const isLegacyAttributionEnabled = LEGACY_SOLD_OUT_ATTRIBUTION_TABLES
+    .every(table => allowedTables.includes(table))
+  if (!isLegacyAttributionEnabled || SOLD_OUT_ATTRIBUTION_TABLES.every(table => allowedTables.includes(table))) {
+    return config
+  }
+  return {
+    ...config,
+    // 固定来源表以查询模板顺序展示，用户原有的其他表仍完整保留在后面。
+    allowedTables: [
+      ...SOLD_OUT_ATTRIBUTION_TABLES,
+      ...allowedTables.filter(table => !SOLD_OUT_ATTRIBUTION_TABLES.includes(table)),
+    ],
+  }
+}
+
 export const DEFAULT_WINDOW_DAYS = 30
 /** 实测：7 天 0.6s / 30 天 0.7s / 45 天 1.0s，但 60 天会跳到 13.9s 并撞 5s 超时。 */
 export const MAX_WINDOW_DAYS = 45

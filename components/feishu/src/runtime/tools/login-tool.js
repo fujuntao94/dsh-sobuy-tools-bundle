@@ -20,9 +20,16 @@ import {
   readJson,
   tokenPath,
 } from '../../domains/auth/token-store.js'
+import { areDistinctAbsolutePaths, isLoopbackHost, isValidPort } from 'sobuy-plugin-core/loopback'
 
 // action 是智能体调用工具时唯一需要传入的参数。
 const LOGIN_ACTIONS = ['login', 'status', 'refresh', 'logout']
+const SETUP_ENDPOINT = Object.freeze({
+  host: '127.0.0.1',
+  port: 18081,
+  path: '/feishu/setup',
+  statusPath: '/feishu/status',
+})
 
 /**
  * 将内部 token 文件转成工具输出。
@@ -66,15 +73,17 @@ async function readCredentials(dataDirectory) {
 }
 
 /** 从插件配置读取所有本机端口和路径，并在启动服务器前验证。 */
-function readLoginOptions(config) {
+export function readLoginOptions(config = {}) {
   // config 来自 cordis.patch.yml；这些是插件运行位置，不是用户输入。
   const options = {
     callbackHost: config.callbackHost || '127.0.0.1',
     callbackPort: Number(config.callbackPort || 18080),
     callbackPath: config.callbackPath || '/feishu/callback',
-    setupPort: Number(config.setupPort || 18081),
-    setupPath: config.setupPath || '/feishu/setup',
-    statusPath: config.statusPath || '/feishu/status',
+    // Desktop client 固定打开这组 URL；禁止运行时覆盖以避免按钮与服务端不一致。
+    setupHost: SETUP_ENDPOINT.host,
+    setupPort: SETUP_ENDPOINT.port,
+    setupPath: SETUP_ENDPOINT.path,
+    statusPath: SETUP_ENDPOINT.statusPath,
     oauthScope: config.oauthScope || 'offline_access contact:user.base:readonly contact:user.department:readonly contact:department.base:readonly',
     authorizationTimeoutMs: Number(config.authorizationTimeoutMs || 300000),
     dataDirectory: config.dataDirectory || defaultDataDirectory(),
@@ -85,11 +94,14 @@ function readLoginOptions(config) {
     options.statusPath,
   ]
 
+  if (['setupHost', 'setupPort', 'setupPath', 'statusPath'].some(key => config[key] !== undefined)) {
+    throw new Error('飞书设置页地址为固定本机协议，不能通过插件配置覆盖。')
+  }
+
   // 设置页和 OAuth 回调必须分开监听，且每个本地 URL 路径必须唯一。
-  const invalidPort = !Number.isInteger(options.callbackPort) || options.callbackPort < 1 || options.callbackPort > 65535
-    || !Number.isInteger(options.setupPort) || options.setupPort < 1 || options.setupPort > 65535
-    || options.callbackPort === options.setupPort
-  if (invalidPort || !['127.0.0.1', '::1'].includes(options.callbackHost) || allPaths.some(path => !path.startsWith('/')) || new Set(allPaths).size !== allPaths.length || !options.oauthScope.trim()) {
+  if (!isValidPort(options.callbackPort) || !isValidPort(options.setupPort)
+    || options.callbackPort === options.setupPort || !isLoopbackHost(options.callbackHost)
+    || !areDistinctAbsolutePaths(allPaths) || !options.oauthScope.trim()) {
     throw new Error('飞书工具插件的本机回调端口或路径配置无效。')
   }
   return options
@@ -103,7 +115,7 @@ function buildRedirectUri({ callbackHost, callbackPort, callbackPath }) {
 
 function assertRedirectUri(options, redirectUri) {
   // 飞书后台登记的回调地址必须完全一致；同时限制为回环地址，避免授权码出现在公网服务。
-  if (!['127.0.0.1', '::1'].includes(options.callbackHost)) {
+  if (!isLoopbackHost(options.callbackHost)) {
     throw new Error('飞书工具插件仅允许监听 127.0.0.1 或 ::1，不能暴露授权回调到网络。')
   }
   const expected = new URL(buildRedirectUri(options))

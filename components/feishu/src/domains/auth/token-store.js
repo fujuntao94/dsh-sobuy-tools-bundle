@@ -2,15 +2,13 @@
  * 私有存储层：唯一允许读写本地凭据的模块。
  * 其他模块只调用这里的函数，避免散落的文件权限和原子写入逻辑。
  */
-// 所有文件 API 都使用 Promise 版本，避免在 Agent/插件进程中阻塞事件循环。
-import { chmod, mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises'
+import { unlink } from 'node:fs/promises'
 // 仅使用路径工具组合本地文件名，避免自行拼接平台相关分隔符。
 import { dirname, join } from 'node:path'
-// 未设置 DSH_HOME 时，令牌仍应落在当前用户的 .dsh 目录而非插件安装目录。
-import { homedir } from 'node:os'
 // 临时文件名使用 UUID，避免并发写入时相互覆盖。
-import { randomUUID } from 'node:crypto'
 import { isVaultEnabled, readVaultSecret, removeVaultSecret, writeVaultSecret } from './credential-vault.js'
+import { readOptionalJson, writePrivateJson as writePrivateJsonFile } from 'sobuy-plugin-core/storage'
+import { componentDataDirectory } from 'sobuy-plugin-core/dsh-paths'
 
 // 同一数据目录的身份切换、退出、授权保存与刷新提交必须串行，防止旧网络请求覆盖新登录态。
 const credentialLocks = new Map()
@@ -31,7 +29,7 @@ export async function withCredentialLock(dataDirectory, work) {
 
 /** 固定使用既有数据目录，确保品牌重命名不影响已有登录态。 */
 export function defaultDataDirectory() {
-  return join(process.env.DSH_HOME || join(homedir(), '.dsh'), 'feishu-login')
+  return componentDataDirectory('feishu-login')
 }
 
 /** 返回用户令牌的固定保存路径。 */
@@ -59,7 +57,8 @@ function vaultNamespace(file) {
  */
 export async function readJson(file) {
   try {
-    const value = JSON.parse(await readFile(file, 'utf8'))
+    const value = await readOptionalJson(file)
+    if (value === undefined) return undefined
     if (!isVaultEnabled()) return value
     if (file === configPath(dirname(file))) {
       return { ...value, appSecret: await readVaultSecret('app-secret', vaultNamespace(file)) || value.appSecret }
@@ -73,7 +72,6 @@ export async function readJson(file) {
     }
     return value
   } catch (error) {
-    if (error?.code === 'ENOENT') return undefined
     throw new Error(`无法读取 ${file}：${error.message}`)
   }
 }
@@ -83,33 +81,20 @@ export async function readJson(file) {
  * 先写同目录临时文件，再 rename 覆盖目标：进程崩溃时旧 token 仍完整，不会留下截断 JSON。
  */
 export async function writePrivateJson(file, value) {
-  const folder = dirname(file)
-  // 目录和文件分别限制为仅当前用户可访问；chmod 同时修正已存在目录的宽松权限。
-  await mkdir(folder, { recursive: true, mode: 0o700 })
-  await chmod(folder, 0o700)
-  const temporary = join(folder, `.${randomUUID()}.tmp`)
-  try {
-    // 写入内容末尾保留换行，方便人工排查；内容本身仍绝不可打印到日志。
-    let storedValue = value
-    if (isVaultEnabled() && file === configPath(dirname(file))) {
-      await writeVaultSecret('app-secret', value.appSecret, vaultNamespace(file))
-      const { appSecret: _appSecret, ...metadata } = value
-      storedValue = metadata
-    }
-    if (isVaultEnabled() && file === tokenPath(dirname(file))) {
-      await writeVaultSecret('access-token', value.accessToken, vaultNamespace(file))
-      await writeVaultSecret('refresh-token', value.refreshToken, vaultNamespace(file))
-      const { accessToken: _accessToken, refreshToken: _refreshToken, ...metadata } = value
-      storedValue = metadata
-    }
-    await writeFile(temporary, `${JSON.stringify(storedValue, null, 2)}\n`, { mode: 0o600 })
-    await chmod(temporary, 0o600)
-    await rename(temporary, file)
-    await chmod(file, 0o600)
-  } finally {
-    // rename 成功后临时文件已不存在；失败时尽力清理，且不遮蔽原始写入错误。
-    await unlink(temporary).catch(() => {})
+  // Vault 映射仍属于飞书领域；共享层只处理文件权限与原子落盘。
+  let storedValue = value
+  if (isVaultEnabled() && file === configPath(dirname(file))) {
+    await writeVaultSecret('app-secret', value.appSecret, vaultNamespace(file))
+    const { appSecret: _appSecret, ...metadata } = value
+    storedValue = metadata
   }
+  if (isVaultEnabled() && file === tokenPath(dirname(file))) {
+    await writeVaultSecret('access-token', value.accessToken, vaultNamespace(file))
+    await writeVaultSecret('refresh-token', value.refreshToken, vaultNamespace(file))
+    const { accessToken: _accessToken, refreshToken: _refreshToken, ...metadata } = value
+    storedValue = metadata
+  }
+  await writePrivateJsonFile(file, storedValue)
 }
 
 /** 删除本机用户令牌，实现插件侧退出登录；不存在时保持幂等。 */

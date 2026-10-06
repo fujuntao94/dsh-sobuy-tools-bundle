@@ -76,10 +76,11 @@ export async function saveAuthorizationResult({ credentials, redirectUri, code, 
 /** 创建仅监听本机回环地址的浏览器设置页服务。 */
 export function createSetupPageServer(ctx, options, redirectUri) {
   return startSetupPageServer({
-    host: options.callbackHost,
+    host: options.setupHost,
     port: options.setupPort,
     setupPath: options.setupPath,
     statusPath: options.statusPath,
+    onError: error => ctx.logger?.warn('飞书设置页请求失败：%s', error.message),
 
     async getStatus() {
       const [credentials, token, authorization] = await Promise.all([

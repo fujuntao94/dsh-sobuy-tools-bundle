@@ -1,6 +1,27 @@
 {
   "name": "sobuy-feishu-tools",
+  "version": "0.1.27",
   "description": "Feishu sign-in, user, department, and leave-balance tools for Sobuy.",
   "type": "module",
-  "icon": "./icon.svg"
+  "main": "./index.js",
+  "icon": "./icon.svg",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./locale/*.json": "./locale/*.json",
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "client": {
+      "inject": [
+        "slots",
+        "locale"
+      ],
+      "platform": "web"
+    }
+  },
+  "dependencies": {
+    "axios": "1.20.0",
+    "sobuy-plugin-core": "file:../../packages/sobuy-plugin-core"
+  }
 }

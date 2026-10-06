@@ -2,8 +2,6 @@
  * OAuth 协议层：只处理飞书 OAuth 协议、浏览器跳转和本机 HTTP 回调。
  * 工具层不需要知道 HTTP 实现，只调用这里导出的函数。
  */
-// Node 内置 HTTP 模块仅用于短生命周期的本地 OAuth 回调服务。
-import { createServer } from 'node:http'
 // 模板在插件加载时读取一次；后续每个 HTTP 请求只做占位符替换。
 import { readFileSync } from 'node:fs'
 // 加密安全随机数用于 OAuth state，不能用时间戳或 Math.random() 替代。
@@ -16,7 +14,16 @@ import {
   withUserAccessToken,
 } from './feishu-sdk.js'
 import { toFeishuApiError } from './feishu-error.js'
+import { startOAuthCallbackServer } from './oauth-callback-server.js'
 import { requireObject, requireString } from '../response-validation.js'
+import {
+  createLocalSetupServer,
+  escapeHtml,
+  localOrigin,
+  renderTemplate,
+} from 'sobuy-plugin-core/http'
+
+export { localOrigin }
 
 // 仅浏览器授权地址与 SDK 尚未语义化封装的撤销地址保留为 URL 常量。
 export const AUTHORIZE_URL = 'https://accounts.feishu.cn/open-apis/authen/v1/authorize'
@@ -24,15 +31,6 @@ export const REVOKE_URL = 'https://accounts.feishu.cn/oauth/v1/revoke'
 
 const CALLBACK_TEMPLATE = readFileSync(new URL('../../ui/pages/callback.html', import.meta.url), 'utf8')
 const SETUP_TEMPLATE = readFileSync(new URL('../../ui/pages/setup.html', import.meta.url), 'utf8')
-
-function escapeHtml(value) {
-  return String(value).replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character])
-}
-
-/** 只替换模板中明确列出的 {{name}} 占位符，避免把 HTML 拼接逻辑散落在业务代码里。 */
-function renderTemplate(template, values) {
-  return template.replace(/\{\{(\w+)\}\}/g, (_match, name) => values[name] ?? '')
-}
 
 export function createState() {
   // 32 字节随机值编码为 URL 安全字符串，足以防止猜测或回调串号。
@@ -77,11 +75,6 @@ export function openInBrowser(url) {
   child.unref()
 }
 
-/** 将回环监听参数转换为浏览器可访问的本机地址。 */
-export function localOrigin(host, port) {
-  return `http://${host === '::1' ? '[::1]' : host}:${port}`
-}
-
 /** 返回授权结果页面；不包含授权码、令牌或应用凭据。 */
 export function callbackHtml(title, detail, { tone = 'error', autoClose = false } = {}) {
   const success = tone === 'success'
@@ -111,98 +104,36 @@ export function setupHtml({ setupPath, setupToken, statusPath, message = '' }) {
   })
 }
 
-function readForm(request) {
-  return new Promise((resolve, reject) => {
-    let body = ''
-    let bodyBytes = 0
-    let settled = false
-    const fail = error => {
-      if (settled) return
-      settled = true
-      reject(error)
-    }
-    request.setEncoding('utf8')
-    request.on('data', chunk => {
-      if (settled) return
-      bodyBytes += Buffer.byteLength(chunk)
-      // 超出限制后不再保留后续内容，避免异常本机请求持续占用内存。
-      if (bodyBytes > 8192) {
-        fail(new Error('配置内容过大'))
-        request.resume()
-        return
-      }
-      body += chunk
-    })
-    request.once('error', fail)
-    request.once('end', () => {
-      if (settled) return
-      settled = true
-      resolve(new URLSearchParams(body))
-    })
-  })
-}
-
 /**
  * 启动浏览器设置页。这个常驻服务只监听本机回环地址。
  */
-export function startSetupPageServer({ host, port, setupPath, statusPath, getStatus, resolveCredentials, beginAuthorization }) {
-  const origin = localOrigin(host, port)
-  const setupToken = createState()
-  const server = createServer(async (request, response) => {
-    const requestUrl = new URL(request.url || '/', origin)
-    const sendPage = async message => {
-      response.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' })
-      response.end(setupHtml({ setupPath, setupToken, statusPath, message }))
-    }
-    if (requestUrl.pathname === setupPath && request.method === 'GET') {
-      await sendPage()
-      return
-    }
-    // 给页面脚本返回脱敏状态，绝不返回 App Secret 或令牌。
-    if (requestUrl.pathname === statusPath && request.method === 'GET') {
+export function startSetupPageServer({ host, port, setupPath, statusPath, getStatus, resolveCredentials, beginAuthorization, onError }) {
+  return createLocalSetupServer({
+    host,
+    port,
+    setupPath,
+    statusPath,
+    bodyLimitBytes: 8192,
+    renderPage: ({ setupToken, message }) => setupHtml({ setupPath, setupToken, statusPath, message }),
+    getStatus,
+    statusError: '无法读取飞书登录状态',
+    onError,
+    submit: async form => {
       try {
-        response.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' })
-        response.end(JSON.stringify(await getStatus()))
-      } catch {
-        response.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' })
-        response.end(JSON.stringify({ error: '无法读取飞书登录状态' }))
-      }
-      return
-    }
-    if (requestUrl.pathname === setupPath && request.method === 'POST') {
-      try {
-        const form = await readForm(request)
-        if (form.get('setup_token') !== setupToken) {
-          await sendPage('设置页已过期，请刷新页面后重试。')
-          return
-        }
         const credentials = await resolveCredentials({
           appId: form.get('app_id')?.trim(), appSecret: form.get('app_secret')?.trim(),
         })
         if (!credentials.appId || !credentials.appSecret) {
-          await sendPage('请填写有效的 App ID 和 App Secret。')
-          return
+          return { message: '请填写有效的 App ID 和 App Secret。' }
         }
         const authorizationUrl = await beginAuthorization(credentials)
         // 凭据只在本机 POST 请求体中出现；浏览器随后直接跳转飞书官方域名。
-        response.writeHead(302, { Location: authorizationUrl, 'Cache-Control': 'no-store' })
-        response.end()
+        return { redirect: authorizationUrl }
       } catch {
-        await sendPage('无法保存配置或启动飞书授权，请检查应用信息后重试。')
+        return { message: '无法保存配置或启动飞书授权，请检查应用信息后重试。' }
       }
-      return
-    }
-    response.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' })
-    response.end('Not Found')
+    },
   })
-  const ready = new Promise((resolve, reject) => {
-    server.once('error', reject)
-    server.listen({ host, port, exclusive: true }, () => {
-      server.off('error', reject)
-      resolve(`${origin}${setupPath}`)
-    })
-  })
-  return { ready, close: () => new Promise(resolve => server.close(resolve)) }
 }
 
 /**
@@ -210,92 +141,16 @@ export function startSetupPageServer({ host, port, setupPath, statusPath, getSta
  * Promise 只有成功拿到授权码、回调异常、超时或用户取消四种结束路径；任一路径均会关闭服务。
  */
 export function waitForCallback({ host, port, path, expectedState, timeoutMs, signal, onAuthorizationCode }) {
-  let resolveReady
-  let rejectReady
-  let readySettled = false
-  const ready = new Promise((resolve, reject) => {
-    resolveReady = value => {
-      if (readySettled) return
-      readySettled = true
-      resolve(value)
-    }
-    rejectReady = error => {
-      if (readySettled) return
-      readySettled = true
-      reject(error)
-    }
+  return startOAuthCallbackServer({
+    host,
+    port,
+    path,
+    expectedState,
+    timeoutMs,
+    signal,
+    onAuthorizationCode: code => completeAuthorizationCode(code, onAuthorizationCode),
+    renderCallbackPage: callbackHtml,
   })
-  const completed = new Promise((resolve, reject) => {
-    let settled = false
-    // 统一清理定时器、取消监听器和 HTTP 服务，避免多次回调导致重复 resolve/reject。
-    const done = (callback) => {
-      if (settled) return
-      settled = true
-      clearTimeout(timeout)
-      signal?.removeEventListener('abort', abort)
-      // 监听失败时 server 可能尚未处于 listening 状态，此时不能调用 close()。
-      if (!server.listening) {
-        callback()
-        return
-      }
-      server.close(callback)
-    }
-    // 将所有失败出口收敛到 done()，保证资源只释放一次。
-    const fail = (error) => {
-      rejectReady(error)
-      done(() => reject(error))
-    }
-    const succeed = (code) => done(() => resolve(code))
-    const abort = () => fail(new Error('授权已取消'))
-    // 服务只处理精确 callbackPath；其他路径不泄露任何授权状态。
-    const server = createServer(async (request, response) => {
-      const requestUrl = new URL(request.url || '/', localOrigin(host, port))
-      if (requestUrl.pathname !== path) {
-        response.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' })
-        response.end('Not Found')
-        return
-      }
-      // 飞书授权成功时携带 code 与原样返回的 state。
-      const code = requestUrl.searchParams.get('code')
-      const state = requestUrl.searchParams.get('state')
-      // 不匹配的 state 可能来自旧标签页或本机探测请求：拒绝当前请求，但继续等待真正的回调。
-      if (state !== expectedState) {
-        response.writeHead(400, { 'Content-Type': 'text/html; charset=utf-8' })
-        response.end(callbackHtml('飞书授权失败', '授权参数无效或已失效，请回到桌面端重新发起登录。'))
-        return
-      }
-      // state 正确却没有授权码，说明本次授权已结束且无法继续等待。
-      if (!code) {
-        response.writeHead(400, { 'Content-Type': 'text/html; charset=utf-8' })
-        response.end(callbackHtml('飞书授权失败', '飞书未返回授权码，请重新发起登录。'))
-        fail(new Error('飞书回调缺少授权码'))
-        return
-      }
-      try {
-        // 只有令牌已成功交换并保存后才向用户报告成功，避免 OAuth 同意页与本机登录态脱节。
-        // 令牌交换必须在成功页之前完成；否则浏览器会显示成功，而实际保存可能失败。
-        const authorizationResult = await completeAuthorizationCode(code, onAuthorizationCode)
-        response.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
-        response.end(callbackHtml('飞书授权成功', '登录状态已保存到本机。', { tone: 'success', autoClose: true }))
-        succeed(authorizationResult)
-      } catch (error) {
-        response.writeHead(500, { 'Content-Type': 'text/html; charset=utf-8' })
-        response.end(callbackHtml('飞书登录未完成', '飞书已返回授权码，但插件未能换取登录令牌。请检查应用权限和凭据后重试。'))
-        fail(error)
-      }
-    })
-    // 授权页面长期闲置时自动回收端口和内存，默认超时时间由插件配置决定。
-    const timeout = setTimeout(() => fail(new Error('等待飞书授权超时，请重新登录')), timeoutMs)
-    server.once('error', error => fail(new Error(`无法启动本机授权回调服务：${error.message}`)))
-    if (signal?.aborted) {
-      abort()
-      return
-    }
-    signal?.addEventListener('abort', abort, { once: true })
-    // exclusive 防止同一端口被多个 callback 服务共享，端口被占用会进入上方 error 分支。
-    server.listen({ host, port, exclusive: true }, () => resolveReady(localOrigin(host, port)))
-  })
-  return { ready, completed }
 }
 
 function legacyTokenShape(token) {

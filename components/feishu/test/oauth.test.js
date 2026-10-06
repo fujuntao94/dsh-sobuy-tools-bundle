@@ -7,7 +7,7 @@ import { createServer } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 // 只测试不需要真实飞书凭据的纯函数，避免单测访问网络或泄露令牌。
-import { hasApplicationCredentials, publicStatus, registerLoginTool } from '../src/runtime/tools/login-tool.js'
+import { hasApplicationCredentials, publicStatus, readLoginOptions, registerLoginTool } from '../src/runtime/tools/login-tool.js'
 import { getValidUserToken, refreshStoredUserToken } from '../src/domains/auth/user-token.js'
 import { logout } from '../src/domains/auth/logout.js'
 import { registerUserInfoTool } from '../src/runtime/tools/user-info-tool.js'
@@ -45,7 +45,7 @@ import {
 } from '../src/domains/auth/oauth.js'
 import { authorizationStatusPath, configPath, readJson, tokenPath, writePrivateJson } from '../src/domains/auth/token-store.js'
 import { readFile } from 'node:fs/promises'
-import packageJson from '../../../package.json' with { type: 'json' }
+import packageJson from '../package.json' with { type: 'json' }
 
 async function availablePort(host = '127.0.0.1') {
   const server = createServer()
@@ -71,6 +71,15 @@ test('OAuth v2 授权链接会编码回调地址、范围并保留 state', () =>
 test('IPv6 回环地址使用合法的方括号 URL', () => {
   assert.equal(localOrigin('::1', 18080), 'http://[::1]:18080')
   assert.doesNotThrow(() => new URL('/feishu/callback', localOrigin('::1', 18080)))
+})
+
+test('飞书设置页地址固定为 Desktop 客户端入口，回调地址仍可独立配置', () => {
+  const options = readLoginOptions({ callbackPort: 19080, callbackPath: '/custom/callback' })
+  assert.equal(options.callbackPort, 19080)
+  assert.equal(options.setupHost, '127.0.0.1')
+  assert.equal(options.setupPort, 18081)
+  assert.equal(options.setupPath, '/feishu/setup')
+  assert.throws(() => readLoginOptions({ setupPort: 19081 }), /固定本机协议/)
 })
 
 test('OAuth 回调端口监听成功后才进入可授权状态', async () => {
@@ -285,9 +294,11 @@ test('授权结果路径与令牌分离，便于展示脱敏错误', () => {
 })
 
 test('Desktop 设置页提供浏览器设置页入口', async () => {
-  const client = await readFile(new URL('../../../client.js', import.meta.url), 'utf8')
-  assert.match(client, /feishu\/setup/)
-  assert.match(client, /openSetupPage/)
+  const client = await readFile(new URL('../client.js', import.meta.url), 'utf8')
+  assert.match(client, /plugins\.row\.config/)
+  assert.match(client, /sobuy-feishu-tools/)
+  assert.match(client, /127\.0\.0\.1:18081\/feishu\/setup/)
+  assert.match(client, /FeishuSettings/)
 })
 
 test('登录工具会区分未配置与已配置但未登录的状态', async () => {

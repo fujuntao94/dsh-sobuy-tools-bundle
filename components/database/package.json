@@ -1,6 +1,27 @@
 {
   "name": "sobuy-database-tools",
+  "version": "0.1.27",
   "description": "Read-only table catalog and query safety checks for the Sobuy order database.",
   "type": "module",
-  "icon": "./icon.svg"
+  "main": "./index.js",
+  "icon": "./icon.svg",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./locale/*.json": "./locale/*.json",
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "client": {
+      "inject": [
+        "slots",
+        "locale"
+      ],
+      "platform": "web"
+    }
+  },
+  "dependencies": {
+    "mysql2": "3.24.5",
+    "sobuy-plugin-core": "file:../../packages/sobuy-plugin-core"
+  }
 }

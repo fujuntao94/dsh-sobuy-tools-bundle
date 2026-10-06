@@ -7,22 +7,30 @@ import { createQueryAuditLogger } from './src/security/query-audit.js'
 import { provideDatabaseSecurityService } from './src/runtime/services/database-security-service.js'
 import { registerSecurityCheckTool } from './src/runtime/tools/security-check-tool.js'
 import { registerSecurityCheckSkill } from './src/runtime/skills/security-check-skill.js'
+import { areDistinctAbsolutePaths, isLoopbackHost, isValidPort } from 'sobuy-plugin-core/loopback'
 
 export const name = 'dsh-sobuy-database-tools'
 export const inject = ['tools', 'skills']
+const SETUP_ENDPOINT = Object.freeze({
+  host: '127.0.0.1',
+  port: 18082,
+  path: '/database/setup',
+  statusPath: '/database/status',
+})
 
 export function readDatabaseOptions(config = {}) {
+  if (['setupHost', 'setupPort', 'setupPath', 'statusPath'].some(key => config[key] !== undefined)) {
+    throw new Error('数据库设置页地址为固定本机协议，不能通过插件配置覆盖。')
+  }
   const options = {
-    setupHost: config.setupHost || '127.0.0.1',
-    setupPort: Number(config.setupPort || 18082),
-    setupPath: config.setupPath || '/database/setup',
-    statusPath: config.statusPath || '/database/status',
+    setupHost: SETUP_ENDPOINT.host,
+    setupPort: SETUP_ENDPOINT.port,
+    setupPath: SETUP_ENDPOINT.path,
+    statusPath: SETUP_ENDPOINT.statusPath,
     dataDirectory: config.dataDirectory || defaultDataDirectory(),
   }
-  const invalidPort = !Number.isInteger(options.setupPort) || options.setupPort < 1 || options.setupPort > 65535
-  const invalidPaths = [options.setupPath, options.statusPath].some(path => !path.startsWith('/'))
-    || options.setupPath === options.statusPath
-  if (invalidPort || !['127.0.0.1', '::1'].includes(options.setupHost) || invalidPaths) {
+  if (!isValidPort(options.setupPort) || !isLoopbackHost(options.setupHost)
+    || !areDistinctAbsolutePaths([options.setupPath, options.statusPath])) {
     throw new Error('数据库组件的本机设置页端口或路径配置无效。')
   }
   return options
@@ -32,7 +40,7 @@ export function apply(ctx, config = {}) {
   const options = readDatabaseOptions(config)
   const auditLogger = createQueryAuditLogger(ctx.logger)
   const securityService = provideDatabaseSecurityService(ctx, { ...options, auditLogger })
-  const setupPage = createDatabaseSetupServer(options)
+  const setupPage = createDatabaseSetupServer({ ...options, logger: ctx.logger })
   void setupPage.ready.catch(error => ctx.logger?.warn('数据库设置页未启动：%s', error.message))
   ctx.effect(() => () => setupPage.close(), 'sobuy-database-tools: setup page server')
   registerListTablesTool(ctx, { ...options, auditLogger })

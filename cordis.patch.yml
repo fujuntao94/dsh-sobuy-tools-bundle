@@ -2,20 +2,12 @@
     # 一个 Sobuy 工具包内聚合独立组件；每个组件仍可在 Desktop 中单独启停。
     # 飞书与数据库都作为总包下可独立启停的子组件。
     - id: sobuy-feishu-tools
-      name: dsh-sobuy-tools-bundle/feishu
+      name: sobuy-feishu-tools
       config:
         callbackHost: 127.0.0.1
         callbackPort: 18080
         callbackPath: /feishu/callback
-        setupPath: /feishu/setup
-        statusPath: /feishu/status
         oauthScope: offline_access contact:user.base:readonly contact:user.department:readonly contact:department.base:readonly
-        setupPort: 18081
         authorizationTimeoutMs: 300000
     - id: sobuy-database-tools
-      name: dsh-sobuy-tools-bundle/database
-      config:
-        setupHost: 127.0.0.1
-        setupPort: 18082
-        setupPath: /database/setup
-        statusPath: /database/status
+      name: sobuy-database-tools

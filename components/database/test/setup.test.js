@@ -91,14 +91,16 @@ test('数据库配置使用独立目录并以私有权限保存', async () => {
   }
 })
 
-test('数据库设置服务只允许监听本机回环地址', () => {
-  assert.throws(() => readDatabaseOptions({ setupHost: '0.0.0.0' }), /配置无效/)
+test('数据库设置服务使用与 Desktop 入口一致的固定本机地址', () => {
+  assert.throws(() => readDatabaseOptions({ setupPort: 18083 }), /固定本机协议/)
   assert.equal(readDatabaseOptions({}).setupPort, 18082)
+  assert.equal(readDatabaseOptions({}).setupPath, '/database/setup')
 })
 
 test('Desktop 设置页提供独立的数据库入口', async () => {
-  const client = await readFile(new URL('../../../client.js', import.meta.url), 'utf8')
+  const client = await readFile(new URL('../client.js', import.meta.url), 'utf8')
   assert.match(client, /sobuy-database-tools/)
+  assert.match(client, /plugins\.row\.config/)
   assert.match(client, /127\.0\.0\.1:18082\/database\/setup/)
-  assert.match(client, /DatabaseSettingsCard/)
+  assert.match(client, /DatabaseSettings/)
 })

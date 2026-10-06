@@ -26,13 +26,31 @@ function localOrigin(host, port) {
 function readForm(request) {
   return new Promise((resolve, reject) => {
     let body = ''
+    let bodyBytes = 0
+    let settled = false
+    const fail = error => {
+      if (settled) return
+      settled = true
+      reject(error)
+    }
     request.setEncoding('utf8')
     request.on('data', chunk => {
+      if (settled) return
+      bodyBytes += Buffer.byteLength(chunk)
+      // 超出限制后不再保留后续内容，避免异常本机请求持续占用内存。
+      if (bodyBytes > 32768) {
+        fail(new Error('配置内容过大'))
+        request.resume()
+        return
+      }
       body += chunk
-      if (Buffer.byteLength(body) > 32768) reject(new Error('配置内容过大'))
     })
-    request.once('error', reject)
-    request.once('end', () => resolve(new URLSearchParams(body)))
+    request.once('error', fail)
+    request.once('end', () => {
+      if (settled) return
+      settled = true
+      resolve(new URLSearchParams(body))
+    })
   })
 }
 

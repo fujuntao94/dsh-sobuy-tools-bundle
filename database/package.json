@@ -1,0 +1,6 @@
+{
+  "name": "sobuy-database-tools",
+  "description": "Read-only table catalog and query safety checks for the Sobuy order database.",
+  "type": "module",
+  "icon": "./icon.svg"
+}

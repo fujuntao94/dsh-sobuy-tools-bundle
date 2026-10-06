@@ -70,14 +70,13 @@
       const maxRows = document.getElementById('max-rows')
       const queryTimeoutMs = document.getElementById('query-timeout-ms')
       const sensitiveFields = document.getElementById('sensitive-fields')
-
       fetch('{{statusPath}}', { cache: 'no-store' }).then(response => {
         if (!response.ok) throw new Error('status request failed')
         return response.json()
       }).then(status => {
         if (!status.configured) {
           statusTitle.textContent = '尚未配置数据库'
-          statusDetail.textContent = '请填写 MySQL 连接信息并保存。'
+          statusDetail.textContent = '请填写订单数据库连接信息并保存。'
           return
         }
         host.value = status.host || ''
@@ -92,7 +91,7 @@
         password.placeholder = '已安全保存；留空表示不修改'
         passwordHint.textContent = '如不更换密码，可留空。'
         statusBox.classList.add('success')
-        statusTitle.textContent = '数据库配置已保存'
+        statusTitle.textContent = '订单数据库配置已保存'
         const allowlist = status.allowedTables?.length ? `${status.allowedTables.length} 张白名单表` : '业务表查询默认禁止'
         statusDetail.textContent = `${status.username}@${status.host}:${status.port}/${status.database}；${allowlist}`
       }).catch(() => {

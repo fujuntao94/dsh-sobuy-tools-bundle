@@ -156,16 +156,18 @@ npm_config_cache=/private/tmp/dsh-sobuy-feishu-tools-npm-cache npm pack --pack-d
 ## 项目结构
 
 ```text
-dsh-sobuy-feishu-tools/
-├── index.js                 # DSH 插件入口
+dsh-sobuy-tools-bundle/
+├── index.js                 # 根包入口，转交飞书运行逻辑
 ├── client.js                # Desktop 设置页入口
-├── cordis.patch.yml         # Desktop profile 配置
-├── src/
-│   ├── runtime/             # Tool、Skill、Service、Hook 等 DSH 扩展入口
-│   ├── domains/             # auth、organization、leave 等飞书业务实现
-│   └── ui/                  # 本机设置页与 OAuth 回调页面
-├── test/                    # 不访问真实飞书的自动化测试
-└── dist/                    # 发布包
+├── cordis.patch.yml         # Bundle 的 Desktop profile 配置
+└── components/
+    └── feishu/
+        ├── index.js         # 飞书 Tool、Skill、Service、Hook 注册入口
+        ├── src/
+        │   ├── runtime/     # Tool、Skill、Service、Hook 等 DSH 扩展入口
+        │   ├── domains/     # auth、organization、leave 等飞书业务实现
+        │   └── ui/          # 本机设置页与 OAuth 回调页面
+        └── test/            # 不访问真实飞书的自动化测试
 ```
 
 模块拆分规则见 [src/README.md](src/README.md)。

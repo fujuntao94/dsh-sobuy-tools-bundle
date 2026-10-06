@@ -1,0 +1,6 @@
+{
+  "name": "sobuy-feishu-tools",
+  "description": "Feishu sign-in, user, department, and leave-balance tools for Sobuy.",
+  "type": "module",
+  "icon": "./icon.svg"
+}

@@ -1,8 +1,8 @@
 - insert:
     # 一个 Sobuy 工具包内聚合独立组件；每个组件仍可在 Desktop 中单独启停。
-    # 根组件同时加载飞书能力与 client 设置页，避免目录中出现单独的 client 组件。
+    # 飞书与数据库都作为总包下可独立启停的子组件。
     - id: sobuy-feishu-tools
-      name: dsh-sobuy-tools-bundle
+      name: dsh-sobuy-tools-bundle/feishu
       config:
         callbackHost: 127.0.0.1
         callbackPort: 18080

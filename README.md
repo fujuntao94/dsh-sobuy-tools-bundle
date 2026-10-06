@@ -8,7 +8,7 @@ dsh-sobuy-tools-bundle/
 ├── cordis.patch.yml
 ├── client.js                # Bundle 的 Desktop 配置界面（通过裸包名 row 加载）
 └── components/
-    ├── feishu/              # patch 中的 dsh-sobuy-tools-bundle/feishu
+    ├── feishu/              # 由根包 dsh-sobuy-tools-bundle 加载的飞书运行逻辑
     └── database/            # 独立数据库设置页（当前只保存配置）
 ```
 

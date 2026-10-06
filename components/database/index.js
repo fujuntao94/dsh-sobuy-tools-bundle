@@ -2,7 +2,15 @@
 import { defaultDataDirectory } from './src/storage/config-store.js'
 import { createDatabaseSetupServer } from './src/setup-page.js'
 import { registerListTablesTool } from './src/runtime/tools/list-tables-tool.js'
+import { registerDescribeTableTool } from './src/runtime/tools/describe-table-tool.js'
+import { registerSoldoutAttributionTool } from './src/runtime/tools/soldout-attribution-tool.js'
+import { registerSoldoutSnapshotTools } from './src/runtime/tools/soldout-snapshot-tool.js'
+import { registerDictionaryTool } from './src/runtime/tools/dictionary-tool.js'
+import { registerOrderTimelineTool } from './src/runtime/tools/order-timeline-tool.js'
 import { registerTableCatalogSkill } from './src/runtime/skills/table-catalog-skill.js'
+import { registerSoldoutAttributionSkill } from './src/runtime/skills/soldout-attribution-skill.js'
+import { registerDictionarySkill } from './src/runtime/skills/dictionary-skill.js'
+import { registerOrderTimelineSkill } from './src/runtime/skills/order-timeline-skill.js'
 import { createQueryAuditLogger } from './src/security/query-audit.js'
 import { provideDatabaseSecurityService } from './src/runtime/services/database-security-service.js'
 import { registerSecurityCheckTool } from './src/runtime/tools/security-check-tool.js'
@@ -44,7 +52,15 @@ export function apply(ctx, config = {}) {
   void setupPage.ready.catch(error => ctx.logger?.warn('数据库设置页未启动：%s', error.message))
   ctx.effect(() => () => setupPage.close(), 'sobuy-database-tools: setup page server')
   registerListTablesTool(ctx, { ...options, auditLogger })
+  registerDescribeTableTool(ctx, { ...options, auditLogger })
+  registerSoldoutAttributionTool(ctx, { ...options, auditLogger })
+  registerSoldoutSnapshotTools(ctx, { ...options, auditLogger })
+  registerDictionaryTool(ctx, { ...options, auditLogger })
+  registerOrderTimelineTool(ctx, { ...options, auditLogger })
   registerSecurityCheckTool(ctx, { securityService })
   registerTableCatalogSkill(ctx)
+  registerSoldoutAttributionSkill(ctx)
+  registerDictionarySkill(ctx)
+  registerOrderTimelineSkill(ctx)
   registerSecurityCheckSkill(ctx)
 }

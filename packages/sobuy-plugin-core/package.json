@@ -1,6 +1,6 @@
 {
   "name": "sobuy-plugin-core",
-  "version": "0.1.27",
+  "version": "0.1.31",
   "description": "Shared local setup and private-storage primitives for Sobuy DSH components.",
   "type": "module",
   "exports": {
@@ -8,6 +8,7 @@
     "./http": "./src/http/local-setup-server.js",
     "./loopback": "./src/config/loopback.js",
     "./dsh-paths": "./src/config/dsh-home.js",
+    "./schema": "./src/schema/dsh-tool-schema.js",
     "./package.json": "./package.json"
   }
 }

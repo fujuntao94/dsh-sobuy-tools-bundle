@@ -20,10 +20,10 @@ test('安全策略限制白名单、最大行数、超时和敏感字段规则',
   }), {
     allowedTables: ['orders', 'order_items'], maxRows: 20, queryTimeoutMs: 2500, sensitiveFields: ['password', 'token'],
   })
-  assert.throws(() => normalizeSecurityPolicy({ maxRows: '1001', queryTimeoutMs: '5000' }), /最大返回行数/)
+  assert.throws(() => normalizeSecurityPolicy({ maxRows: '5001', queryTimeoutMs: '5000' }), /最大返回行数/)
   assert.throws(() => normalizeSecurityPolicy({ maxRows: '10', queryTimeoutMs: '100' }), /查询超时/)
   assert.throws(() => normalizeSecurityPolicy({ allowedTables: `orders\n${'x'.repeat(65)}` }), /白名单包含无效名称/)
-  assert.equal(resolveSecurityPolicy({ maxRows: 99999 }).maxRows, 100)
+  assert.equal(resolveSecurityPolicy({ maxRows: 99999 }).maxRows, 500)
 })
 
 test('结构化查询只生成单条 SELECT，并强制白名单、参数化和最大行数', () => {

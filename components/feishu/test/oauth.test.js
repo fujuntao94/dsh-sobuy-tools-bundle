@@ -247,15 +247,21 @@ test('刷新期间切换应用会丢弃旧 token，不覆盖新登录态', async
     await writePrivateJson(tokenPath(folder), { accessToken: 'old-access', refreshToken: 'old-refresh', expiresAt: Date.now() - 1000 })
     let releaseRefresh
     const refreshGate = new Promise(resolve => { releaseRefresh = resolve })
+    // 必须等到刷新真正发起（此时实现已读完旧的凭据与 token）再写入新登录态。
+    // 此前用 setTimeout(0) 猜测进度并不可靠：定时器可能先于实现的文件读取回调触发，
+    // 于是新 token（未过期）先落盘，实现读到后直接复用、不走刷新，断言便等不到 rejection。
+    let markRefreshStarted
+    const refreshStarted = new Promise(resolve => { markRefreshStarted = resolve })
     const client = {
       accessToken: { refresh: async () => {
+        markRefreshStarted()
         await refreshGate
         return { accessToken: 'stale-access', refreshToken: 'stale-refresh', expiresIn: 7200 }
       } },
       authen: { v1: { userInfo: { get: async () => ({ code: 0, data: { open_id: 'ou_old', name: '旧用户' } }) } } },
     }
     const refreshing = refreshStoredUserToken({ dataDirectory: folder, oauthClient: client })
-    await new Promise(resolve => setTimeout(resolve, 0))
+    await refreshStarted
     await writePrivateJson(configPath(folder), { appId: 'cli_new', appSecret: 'new-secret' })
     await writePrivateJson(tokenPath(folder), { accessToken: 'new-access', refreshToken: 'new-refresh', expiresAt: Date.now() + 7200000 })
     releaseRefresh()
@@ -274,11 +280,19 @@ test('退出撤销期间重新登录时不会删除新 token', async () => {
     await writePrivateJson(tokenPath(folder), { accessToken: 'old-access', refreshToken: 'old-refresh' })
     let releaseRevoke
     const revokeGate = new Promise(resolve => { releaseRevoke = resolve })
+    // 必须等到撤销真正开始（此时 logout 已读到旧 token）再写入新 token。
+    // 此前用 setTimeout(0) 猜测进度并不可靠：定时器可能先于 logout 的文件读取回调触发，
+    // 于是新 token 先落盘、logout 读到的是新值，撤销后判定为同一份而误删，测试随机失败。
+    let markRevokeStarted
+    const revokeStarted = new Promise(resolve => { markRevokeStarted = resolve })
     const loggingOut = logout({
       dataDirectory: folder,
-      revokeOAuthTokenImpl: async () => revokeGate,
+      revokeOAuthTokenImpl: async () => {
+        markRevokeStarted()
+        return revokeGate
+      },
     })
-    await new Promise(resolve => setTimeout(resolve, 0))
+    await revokeStarted
     await writePrivateJson(tokenPath(folder), { accessToken: 'new-access', refreshToken: 'new-refresh' })
     releaseRevoke()
 

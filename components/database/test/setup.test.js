@@ -40,8 +40,8 @@ test('数据库状态不会向浏览器返回密码', () => {
     passwordConfigured: true,
     ssl: true,
     allowedTables: [],
-    maxRows: 100,
-    queryTimeoutMs: 5000,
+    maxRows: 500,
+    queryTimeoutMs: 15000,
     sensitiveFields: ['password', 'passwd', 'secret', 'token', 'access_token', 'refresh_token', 'id_card', 'identity_number', 'mobile', 'phone', 'email'],
     tableAllowlistEnabled: false,
     arbitrarySqlAllowed: false,
@@ -60,8 +60,8 @@ test('留空密码时复用已保存密码，并校验端口', () => {
   assert.equal(normalized.port, 3307)
   assert.equal(normalized.ssl, true)
   assert.deepEqual(normalized.allowedTables, [])
-  assert.equal(normalized.maxRows, 100)
-  assert.equal(normalized.queryTimeoutMs, 5000)
+  assert.equal(normalized.maxRows, 500)
+  assert.equal(normalized.queryTimeoutMs, 15000)
   assert.throws(() => normalizeDatabaseConfig({
     host: 'db.internal', port: '70000', database: 'orders', username: 'readonly', password: 'secret',
   }), /完整填写/)

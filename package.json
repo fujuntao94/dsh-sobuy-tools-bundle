@@ -1,6 +1,6 @@
 {
   "name": "dsh-sobuy-tools-bundle",
-  "version": "0.1.27",
+  "version": "0.1.31",
   "description": "Sobuy DSH 工具组件包：飞书工具与订单数据库。",
   "icon": "./icon.svg",
   "type": "module",
@@ -11,14 +11,16 @@
     "icon.svg",
     "locale/*.json",
     "components/",
-    "packages/"
+    "packages/",
+    "test/"
   ],
   "scripts": {
     "prepack": "node scripts/sync-package-versions.js",
-    "test": "node --test packages/sobuy-plugin-core/test/core.test.js components/feishu/test/oauth.test.js components/database/test/setup.test.js components/database/test/table-catalog.test.js components/database/test/security.test.js",
-    "check": "node --check packages/sobuy-plugin-core/src/storage/private-json.js && node --check packages/sobuy-plugin-core/src/http/local-setup-server.js && node --check packages/sobuy-plugin-core/src/config/loopback.js && node --check packages/sobuy-plugin-core/src/config/dsh-home.js && cd components/feishu && node scripts/check-syntax.js && node --check client.js && node --check src/domains/auth/oauth-callback-server.js && cd ../database && node --check index.js && node --check client.js && node --check src/setup-page.js && node --check src/storage/config-store.js && node --check src/domains/connection.js && node --check src/domains/account-security.js && node --check src/domains/table-catalog.js && node --check src/security/policy.js && node --check src/security/query-audit.js && node --check src/security/sensitive-fields.js && node --check src/security/safe-select.js && node --check src/runtime/services/database-security-service.js && node --check src/runtime/tools/list-tables-tool.js && node --check src/runtime/tools/security-check-tool.js && node --check src/runtime/skills/table-catalog-skill.js && node --check src/runtime/skills/security-check-skill.js",
+    "test": "node --test test/tool-schema.test.js packages/sobuy-plugin-core/test/core.test.js components/feishu/test/oauth.test.js components/database/test/setup.test.js components/database/test/table-catalog.test.js components/database/test/table-schema.test.js components/database/test/security.test.js components/database/test/soldout-attribution.test.js components/database/test/soldout-snapshot.test.js components/database/test/dictionary.test.js components/database/test/order-timeline.test.js",
+    "check": "node --check packages/sobuy-plugin-core/src/storage/private-json.js && node --check packages/sobuy-plugin-core/src/http/local-setup-server.js && node --check packages/sobuy-plugin-core/src/config/loopback.js && node --check packages/sobuy-plugin-core/src/config/dsh-home.js && node --check packages/sobuy-plugin-core/src/schema/dsh-tool-schema.js && cd components/feishu && node scripts/check-syntax.js && node --check client.js && node --check src/domains/auth/oauth-callback-server.js && cd ../database && node --check index.js && node --check client.js && node --check src/setup-page.js && node --check src/storage/config-store.js && node --check src/storage/soldout-snapshot-store.js && node --check src/domains/connection.js && node --check src/domains/account-security.js && node --check src/domains/table-catalog.js && node --check src/domains/table-schema.js && node --check src/domains/format.js && node --check src/domains/soldout-attribution.js && node --check src/domains/dictionary.js && node --check src/domains/order-timeline.js && node --check src/security/policy.js && node --check src/security/query-audit.js && node --check src/security/sensitive-fields.js && node --check src/security/safe-select.js && node --check src/runtime/services/database-security-service.js && node --check src/runtime/tools/list-tables-tool.js && node --check src/runtime/tools/describe-table-tool.js && node --check src/runtime/tools/security-check-tool.js && node --check src/runtime/tools/soldout-attribution-tool.js && node --check src/runtime/tools/soldout-snapshot-tool.js && node --check src/runtime/tools/dictionary-tool.js && node --check src/runtime/tools/order-timeline-tool.js && node --check src/runtime/skills/table-catalog-skill.js && node --check src/runtime/skills/security-check-skill.js && node --check src/runtime/skills/soldout-attribution-skill.js && node --check src/runtime/skills/dictionary-skill.js && node --check src/runtime/skills/order-timeline-skill.js",
     "verify": "npm run check && npm test",
     "verify:package": "node scripts/verify-package.mjs",
+    "check:host-schema": "node scripts/host-schema-check.mjs",
     "pack:release": "npm run verify && npm version patch --no-git-tag-version && npm_config_cache=/private/tmp/dsh-sobuy-npm-cache npm pack --pack-destination dist && npm run verify:package"
   },
   "dependencies": {

@@ -1,6 +1,6 @@
 const ALLOWED_FIELDS = [
   'operation', 'status', 'table', 'columnCount', 'conditionCount', 'appliedLimit',
-  'rowCount', 'durationMs', 'errorKind',
+  'rowCount', 'durationMs', 'errorKind', 'windowDays', 'groupBy',
 ]
 
 export function redactQueryAuditEvent(event = {}) {

@@ -5,8 +5,8 @@ export const DEFAULT_SENSITIVE_FIELDS = [
 
 export const DEFAULT_SECURITY_POLICY = Object.freeze({
   allowedTables: [],
-  maxRows: 100,
-  queryTimeoutMs: 5000,
+  maxRows: 500,
+  queryTimeoutMs: 15000,
   sensitiveFields: DEFAULT_SENSITIVE_FIELDS,
 })
 
@@ -42,8 +42,8 @@ function boundedInteger(value, fallback, minimum, maximum) {
 export function resolveSecurityPolicy(config = {}) {
   return {
     allowedTables: safeIdentifierList(config.allowedTables, { maxItems: 500 }),
-    maxRows: boundedInteger(config.maxRows, DEFAULT_SECURITY_POLICY.maxRows, 1, 1000),
-    queryTimeoutMs: boundedInteger(config.queryTimeoutMs, DEFAULT_SECURITY_POLICY.queryTimeoutMs, 500, 30000),
+    maxRows: boundedInteger(config.maxRows, DEFAULT_SECURITY_POLICY.maxRows, 1, 5000),
+    queryTimeoutMs: boundedInteger(config.queryTimeoutMs, DEFAULT_SECURITY_POLICY.queryTimeoutMs, 500, 60000),
     sensitiveFields: safeIdentifierList(config.sensitiveFields, {
       maxItems: 100,
       fallback: DEFAULT_SENSITIVE_FIELDS,
@@ -66,11 +66,11 @@ export function normalizeSecurityPolicy(input = {}, previous = {}) {
     ? resolveSecurityPolicy(previous).queryTimeoutMs
     : Number(input.queryTimeoutMs)
 
-  if (!Number.isInteger(maxRows) || maxRows < 1 || maxRows > 1000) {
-    throw new Error('最大返回行数必须是 1 到 1000 之间的整数。')
+  if (!Number.isInteger(maxRows) || maxRows < 1 || maxRows > 5000) {
+    throw new Error('最大返回行数必须是 1 到 5000 之间的整数。')
   }
-  if (!Number.isInteger(queryTimeoutMs) || queryTimeoutMs < 500 || queryTimeoutMs > 30000) {
-    throw new Error('查询超时必须是 500 到 30000 毫秒之间的整数。')
+  if (!Number.isInteger(queryTimeoutMs) || queryTimeoutMs < 500 || queryTimeoutMs > 60000) {
+    throw new Error('查询超时必须是 500 到 60000 毫秒之间的整数。')
   }
   return { allowedTables, maxRows, queryTimeoutMs, sensitiveFields }
 }

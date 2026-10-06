@@ -1,6 +1,6 @@
 {
   "name": "sobuy-feishu-tools",
-  "version": "0.1.27",
+  "version": "0.1.31",
   "description": "Feishu sign-in, user, department, and leave-balance tools for Sobuy.",
   "type": "module",
   "main": "./index.js",

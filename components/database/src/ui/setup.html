@@ -46,8 +46,8 @@
         <h2>查询安全策略</h2>
         <div class="field"><label for="allowed-tables">业务表白名单</label><textarea id="allowed-tables" name="allowed_tables" placeholder="每行一个表名，例如：&#10;orders&#10;order_items"></textarea><p class="hint">留空表示禁止业务表查询；表清单元数据查询不受此项影响。</p></div>
         <div class="row field">
-          <div><label for="max-rows">最大返回行数</label><input id="max-rows" name="max_rows" required inputmode="numeric" value="100"></div>
-          <div><label for="query-timeout-ms">查询超时（毫秒）</label><input id="query-timeout-ms" name="query_timeout_ms" required inputmode="numeric" value="5000"></div>
+          <div><label for="max-rows">最大返回行数</label><input id="max-rows" name="max_rows" required inputmode="numeric" min="1" max="5000" value="500"></div>
+          <div><label for="query-timeout-ms">查询超时（毫秒）</label><input id="query-timeout-ms" name="query_timeout_ms" required inputmode="numeric" min="500" max="60000" value="15000"></div>
         </div>
         <div class="field"><label for="sensitive-fields">敏感字段规则</label><textarea id="sensitive-fields" name="sensitive_fields" placeholder="每行一个字段关键词"></textarea><p class="hint">匹配字段会统一返回 [REDACTED]；留空时恢复安全默认规则。</p></div>
         <button type="submit" id="submit-button">保存数据库配置</button>
@@ -85,8 +85,8 @@
         username.value = status.username || ''
         ssl.checked = Boolean(status.ssl)
         allowedTables.value = (status.allowedTables || []).join('\n')
-        maxRows.value = status.maxRows || 100
-        queryTimeoutMs.value = status.queryTimeoutMs || 5000
+        maxRows.value = status.maxRows || 500
+        queryTimeoutMs.value = status.queryTimeoutMs || 15000
         sensitiveFields.value = (status.sensitiveFields || []).join('\n')
         password.placeholder = '已安全保存；留空表示不修改'
         passwordHint.textContent = '如不更换密码，可留空。'

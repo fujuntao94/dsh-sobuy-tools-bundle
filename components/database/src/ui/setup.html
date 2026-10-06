@@ -44,7 +44,6 @@
         <div class="field"><label for="password">密码</label><input id="password" name="password" type="password" autocomplete="new-password" placeholder="请输入数据库密码"><p class="hint" id="password-hint">密码会以仅当前系统用户可读的权限保存在本机。</p></div>
         <label class="check"><input id="ssl" name="ssl" type="checkbox"> 使用 SSL 连接</label>
         <h2>查询安全策略</h2>
-        <div class="field"><label for="allowed-tables">业务表白名单</label><textarea id="allowed-tables" name="allowed_tables" placeholder="每行一个表名，例如：&#10;orders&#10;order_items"></textarea><p class="hint">留空表示禁止业务表查询；表清单元数据查询不受此项影响。</p></div>
         <div class="row field">
           <div><label for="max-rows">最大返回行数</label><input id="max-rows" name="max_rows" required inputmode="numeric" min="1" max="5000" value="500"></div>
           <div><label for="query-timeout-ms">查询超时（毫秒）</label><input id="query-timeout-ms" name="query_timeout_ms" required inputmode="numeric" min="500" max="60000" value="15000"></div>
@@ -66,7 +65,6 @@
       const password = document.getElementById('password')
       const passwordHint = document.getElementById('password-hint')
       const ssl = document.getElementById('ssl')
-      const allowedTables = document.getElementById('allowed-tables')
       const maxRows = document.getElementById('max-rows')
       const queryTimeoutMs = document.getElementById('query-timeout-ms')
       const sensitiveFields = document.getElementById('sensitive-fields')
@@ -84,7 +82,6 @@
         database.value = status.database || ''
         username.value = status.username || ''
         ssl.checked = Boolean(status.ssl)
-        allowedTables.value = (status.allowedTables || []).join('\n')
         maxRows.value = status.maxRows || 500
         queryTimeoutMs.value = status.queryTimeoutMs || 15000
         sensitiveFields.value = (status.sensitiveFields || []).join('\n')
@@ -92,8 +89,7 @@
         passwordHint.textContent = '如不更换密码，可留空。'
         statusBox.classList.add('success')
         statusTitle.textContent = '订单数据库配置已保存'
-        const allowlist = status.allowedTables?.length ? `${status.allowedTables.length} 张白名单表` : '业务表查询默认禁止'
-        statusDetail.textContent = `${status.username}@${status.host}:${status.port}/${status.database}；${allowlist}`
+        statusDetail.textContent = `${status.username}@${status.host}:${status.port}/${status.database}；所有业务表可供现有只读工具访问`
       }).catch(() => {
         statusTitle.textContent = '无法读取已保存状态'
         statusDetail.textContent = '请确认 Sobuy 数据库组件正在运行后刷新页面。'

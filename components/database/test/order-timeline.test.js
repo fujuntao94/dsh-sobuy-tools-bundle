@@ -7,7 +7,6 @@ import {
   DEFAULT_TIMELINE_LIMIT,
   MAX_TIMELINE_LIMIT,
   ORDER_TIMELINE_TABLES,
-  assertTimelineTablesAllowed,
   buildTimelineQuery,
   normalizeTimelineEntries,
   normalizeTimelineParams,
@@ -21,7 +20,7 @@ import { writePrivateConfig } from '../src/storage/config-store.js'
 const CONFIG = {
   type: 'mysql', host: 'db.internal', port: 3306, database: 'sobuy-oms',
   username: 'readonly', password: 'secret', ssl: false,
-  allowedTables: [...ORDER_TIMELINE_TABLES], maxRows: 100, queryTimeoutMs: 5000,
+  allowedTables: [], maxRows: 100, queryTimeoutMs: 5000,
 }
 
 const INTERCEPT_ROW = {
@@ -84,14 +83,6 @@ test('时间线每条 SQL 的占位符数量都与参数个数一致', () => {
   }
 })
 
-test('时间线要求两张表都在白名单内，缺哪张就报哪张', () => {
-  assert.throws(() => assertTimelineTablesAllowed({ ...CONFIG, allowedTables: [] }),
-    /oms_t_order_action、bas_t_dict_values/)
-  assert.throws(() => assertTimelineTablesAllowed({ ...CONFIG, allowedTables: ['oms_t_order_action'] }),
-    /bas_t_dict_values/)
-  assert.doesNotThrow(() => assertTimelineTablesAllowed(CONFIG))
-})
-
 test('原因码翻译不到时保留原编码并显式标记未翻译', () => {
   const entries = normalizeTimelineEntries([
     INTERCEPT_ROW,
@@ -142,7 +133,7 @@ test('时间线先查总数再取最近若干条，并统计翻译覆盖', async
     'translatedReasons', 'untranslatedReasons', 'entries', 'generatedAt',
   ])
 
-  await assert.rejects(runOrderTimeline({ ...CONFIG, allowedTables: [] }, { order_id: 'a' }), /业务表白名单/)
+  assert.deepEqual(CONFIG.allowedTables, [], '固定订单时间线不依赖业务表白名单')
 })
 
 test('时间线 Tool 渲染轨迹并明确提示未翻译与截断', async () => {

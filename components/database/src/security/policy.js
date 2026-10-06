@@ -4,7 +4,6 @@ export const DEFAULT_SENSITIVE_FIELDS = [
 ]
 
 export const DEFAULT_SECURITY_POLICY = Object.freeze({
-  allowedTables: [],
   maxRows: 500,
   queryTimeoutMs: 15000,
   sensitiveFields: DEFAULT_SENSITIVE_FIELDS,
@@ -41,7 +40,6 @@ function boundedInteger(value, fallback, minimum, maximum) {
 /** 读取磁盘配置时采用安全默认值，手工篡改配置也不能放大限制。 */
 export function resolveSecurityPolicy(config = {}) {
   return {
-    allowedTables: safeIdentifierList(config.allowedTables, { maxItems: 500 }),
     maxRows: boundedInteger(config.maxRows, DEFAULT_SECURITY_POLICY.maxRows, 1, 5000),
     queryTimeoutMs: boundedInteger(config.queryTimeoutMs, DEFAULT_SECURITY_POLICY.queryTimeoutMs, 500, 60000),
     sensitiveFields: safeIdentifierList(config.sensitiveFields, {
@@ -53,9 +51,6 @@ export function resolveSecurityPolicy(config = {}) {
 
 /** 设置页保存时严格校验，避免用户误以为超出安全边界的值已经生效。 */
 export function normalizeSecurityPolicy(input = {}, previous = {}) {
-  const allowedTables = input.allowedTables === undefined
-    ? resolveSecurityPolicy(previous).allowedTables
-    : configuredIdentifierList(input.allowedTables, { label: '业务表白名单', maxItems: 500 })
   const sensitiveFields = input.sensitiveFields === undefined
     ? resolveSecurityPolicy(previous).sensitiveFields
     : configuredIdentifierList(input.sensitiveFields, { label: '敏感字段规则', maxItems: 100, fallback: DEFAULT_SENSITIVE_FIELDS })
@@ -72,14 +67,13 @@ export function normalizeSecurityPolicy(input = {}, previous = {}) {
   if (!Number.isInteger(queryTimeoutMs) || queryTimeoutMs < 500 || queryTimeoutMs > 60000) {
     throw new Error('查询超时必须是 500 到 60000 毫秒之间的整数。')
   }
-  return { allowedTables, maxRows, queryTimeoutMs, sensitiveFields }
+  return { maxRows, queryTimeoutMs, sensitiveFields }
 }
 
 export function publicSecurityPolicy(config = {}) {
   const policy = resolveSecurityPolicy(config)
   return {
     ...policy,
-    tableAllowlistEnabled: policy.allowedTables.length > 0,
     arbitrarySqlAllowed: false,
     multipleStatementsAllowed: false,
     writeStatementsAllowed: false,

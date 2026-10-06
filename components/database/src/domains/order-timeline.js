@@ -24,7 +24,7 @@ import { DICTIONARY_VALUES_TABLE, REASON_CODE_DICT_ID } from './dictionary.js'
 
 const ACTION_TABLE = 'oms_t_order_action'
 
-/** 时间线要读操作流水，并借字典表翻译原因码，两张表都必须先加入白名单。 */
+/** 时间线固定读取操作流水与原因码字典。 */
 export const ORDER_TIMELINE_TABLES = Object.freeze([ACTION_TABLE, DICTIONARY_VALUES_TABLE])
 
 export const DEFAULT_TIMELINE_LIMIT = 50
@@ -75,15 +75,6 @@ export function normalizeTimelineParams(input = {}) {
     limit: input.limit === undefined || input.limit === null
       ? DEFAULT_TIMELINE_LIMIT
       : positiveInteger(input.limit, 'limit', { minimum: 1, maximum: MAX_TIMELINE_LIMIT }),
-  }
-}
-
-/** 两张表必须都在白名单内；缺哪张就报哪张，便于直接照做。 */
-export function assertTimelineTablesAllowed(config = {}) {
-  const { allowedTables } = resolveSecurityPolicy(config)
-  const missing = ORDER_TIMELINE_TABLES.filter(table => !allowedTables.includes(table))
-  if (missing.length) {
-    throw new Error(`订单时间线需要先把以下数据表加入业务表白名单：${missing.join('、')}。请在数据库设置页添加后重试。`)
   }
 }
 
@@ -157,7 +148,6 @@ export async function runOrderTimeline(config, input = {}, {
   now = () => new Date(),
 } = {}) {
   const params = normalizeTimelineParams(input)
-  assertTimelineTablesAllowed(config)
   const built = buildTimelineQuery(params)
 
   const payload = await runDatabaseOperation(

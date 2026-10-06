@@ -7,7 +7,6 @@ import {
   DICTIONARY_TABLES,
   MAX_DICTIONARY_ROWS,
   REASON_CODE_DICT_ID,
-  assertDictionaryTablesAllowed,
   buildDictionaryValuesQuery,
   isDictionaryDiscovery,
   normalizeDictionaryCatalog,
@@ -22,7 +21,7 @@ import { writePrivateConfig } from '../src/storage/config-store.js'
 const CONFIG = {
   type: 'mysql', host: 'db.internal', port: 3306, database: 'sobuy-oms',
   username: 'readonly', password: 'secret', ssl: false,
-  allowedTables: [...DICTIONARY_TABLES], maxRows: 100, queryTimeoutMs: 5000,
+  allowedTables: [], maxRows: 100, queryTimeoutMs: 5000,
 }
 
 const G17_ROW = {
@@ -101,14 +100,6 @@ test('每种参数组合的占位符数量都与参数个数一致', () => {
   }
 })
 
-test('字典查询要求两张表都在白名单内，缺哪张就报哪张', () => {
-  assert.throws(() => assertDictionaryTablesAllowed({ ...CONFIG, allowedTables: [] }),
-    /bas_t_dict、bas_t_dict_values/)
-  assert.throws(() => assertDictionaryTablesAllowed({ ...CONFIG, allowedTables: ['bas_t_dict'] }),
-    /bas_t_dict_values/)
-  assert.doesNotThrow(() => assertDictionaryTablesAllowed(CONFIG))
-})
-
 test('字典行归一化区分已失效与未启用', () => {
   const entries = normalizeDictionaryEntries([
     G17_ROW,
@@ -171,7 +162,7 @@ test('目录模式只跑目录查询，取值模式只跑参数化取值查询',
   assert.deepEqual(executes.at(-1).values, [3, 'G17'])
 
   assert.equal(MAX_DICTIONARY_ROWS >= 305, true)
-  await assert.rejects(runDictionaryLookup({ ...CONFIG, allowedTables: [] }, {}), /业务表白名单/)
+  assert.deepEqual(CONFIG.allowedTables, [], '固定字典查询不依赖业务表白名单')
 })
 
 test('字典 Tool 从私有配置执行并渲染翻译结果', async () => {

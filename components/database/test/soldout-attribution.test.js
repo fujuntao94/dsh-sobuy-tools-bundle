@@ -3,17 +3,15 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
+import { dshToolValueViolations } from 'sobuy-plugin-core/schema'
 import {
   MAX_WINDOW_DAYS,
-  LEGACY_SOLD_OUT_ATTRIBUTION_TABLES,
   SOLD_OUT_ATTRIBUTION_TABLES,
-  assertAttributionTablesAllowed,
   buildSoldoutAttributionQuery,
   classifyAttribution,
   normalizeAttributionParams,
   normalizeAttributionRows,
   runSoldoutAttribution,
-  upgradeLegacyAttributionAllowlist,
 } from '../src/domains/soldout-attribution.js'
 import { createSoldoutAttributionTool, registerSoldoutAttributionTool } from '../src/runtime/tools/soldout-attribution-tool.js'
 import { registerSoldoutAttributionSkill } from '../src/runtime/skills/soldout-attribution-skill.js'
@@ -22,7 +20,7 @@ import { writePrivateConfig } from '../src/storage/config-store.js'
 const CONFIG = {
   type: 'mysql', host: 'db.internal', port: 3306, database: 'sobuy-oms',
   username: 'readonly', password: 'secret', ssl: false,
-  allowedTables: [...SOLD_OUT_ATTRIBUTION_TABLES], maxRows: 100, queryTimeoutMs: 5000,
+  allowedTables: [], maxRows: 100, queryTimeoutMs: 5000,
 }
 
 const SKU_ROW = {
@@ -33,6 +31,8 @@ const SKU_ROW = {
   local_available: 0, other_warehouse_available: 102,
   warning_presell_num: 137, warning_critical_value: 20, warning_deal_flag: 0,
   has_warning: 1, warning_create_time: '2026-10-01 06:00:00',
+  container_eta_store: '2026-10-10 08:00:00', container_ata_store: null,
+  container_presale_expire: '2026-10-09 23:59:59', container_presale_status: 1,
 }
 
 test('缺货归因参数只接受白名单字段，默认只看当前待处理的订单', () => {
@@ -96,22 +96,6 @@ test('每种参数组合的占位符数量都与参数个数一致', () => {
       `占位符与参数个数不一致：${JSON.stringify(input)}`,
     )
   }
-})
-
-test('缺货归因要求所有来源表全部在白名单内，缺哪张就报哪张', () => {
-  assert.throws(() => assertAttributionTablesAllowed({ ...CONFIG, allowedTables: [] }),
-    /oms_t_orders_tracking、oms_t_inventory、oms_t_inventory_detail、early_warn_inventory_info、bas_t_container、bas_t_container_sku/)
-  assert.throws(() => assertAttributionTablesAllowed({ ...CONFIG, allowedTables: ['oms_t_orders_tracking'] }),
-    /oms_t_inventory、oms_t_inventory_detail、early_warn_inventory_info、bas_t_container、bas_t_container_sku/)
-  assert.doesNotThrow(() => assertAttributionTablesAllowed(CONFIG))
-})
-
-test('已启用旧版缺货归因的白名单会补齐固定新增来源表，其他白名单不自动扩大', () => {
-  const migrated = upgradeLegacyAttributionAllowlist({ allowedTables: [...LEGACY_SOLD_OUT_ATTRIBUTION_TABLES, 'custom_report'] })
-  assert.deepEqual(migrated.allowedTables, [...SOLD_OUT_ATTRIBUTION_TABLES, 'custom_report'])
-  assert.doesNotThrow(() => assertAttributionTablesAllowed(migrated))
-  assert.deepEqual(upgradeLegacyAttributionAllowlist({ allowedTables: ['oms_t_orders_tracking'] }).allowedTables, ['oms_t_orders_tracking'])
-  assert.deepEqual(upgradeLegacyAttributionAllowlist({ allowedTables: [] }).allowedTables, [])
 })
 
 test('缺货原因返回主因、并发因素和下一步动作', () => {
@@ -192,11 +176,7 @@ test('缺货归因执行只读聚合查询，参数化传值并返回归因结�
   assert.equal(result.rows[0].priority, 'P2')
   assert.equal(result.actionSummary.byReason[0].quantitySum, 82)
   assert.equal(ended, true)
-
-  await assert.rejects(
-    runSoldoutAttribution({ ...CONFIG, allowedTables: [] }, {}),
-    /业务表白名单/,
-  )
+  assert.deepEqual(CONFIG.allowedTables, [], '固定缺货归因不依赖业务表白名单')
 })
 
 test('缺货归因 Tool 从私有配置执行并渲染原因与依据', async () => {
@@ -220,6 +200,10 @@ test('缺货归因 Tool 从私有配置执行并渲染原因与依据', async ()
     assert.deepEqual(tool.output.schema.required, ['windowDays', 'groupBy', 'scope', 'generatedAt', 'groups', 'actionSummary', 'rows'])
     assert.equal(tool.parameters.additionalProperties, false)
     assert.deepEqual(tool.parameters.properties.group_by.enum, ['sku', 'warehouse'])
+    assert.deepEqual(Object.keys(tool.output.schema.properties.rows.items.properties).filter(key => key.startsWith('container')).sort(), [
+      'containerAtaStore', 'containerCount', 'containerEtaStore', 'containerPresaleExpire', 'containerPresaleStatus',
+    ])
+    assert.deepEqual(dshToolValueViolations(tool.output.schema, value), [])
 
     const text = tool.output.render({}, value)[0].text
     assert.match(text, /近 30 天缺货归因（当前待处理口径/)
@@ -227,7 +211,7 @@ test('缺货归因 Tool 从私有配置执行并渲染原因与依据', async ()
     assert.match(text, /原因：发货仓可用 0；其他仓合计可用 102/)
     assert.match(text, /依据：发货仓可用 0；其他仓可用 102；预警预售量 137；预警未处理/)
     assert.match(text, /建议：优先核实候选仓可调拨性/)
-    assert.match(text, /并发因素：预售占用可发库存；库存预警尚未处理/)
+    assert.match(text, /并发因素：预售占用可发库存；关联预售货柜尚未到库；库存预警尚未处理/)
     assert.match(text, /不是数据库中的原因字段/)
     assert.doesNotMatch(text, /secret|db\.internal|password/)
   } finally {

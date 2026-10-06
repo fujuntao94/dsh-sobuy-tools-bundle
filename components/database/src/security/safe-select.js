@@ -18,7 +18,7 @@ export function buildSafeSelect(query, config = {}) {
 
   const policy = resolveSecurityPolicy(config)
   const table = typeof query.table === 'string' ? query.table.trim() : ''
-  if (!policy.allowedTables.includes(table)) throw new Error(`数据表 ${table || '（空）'} 不在白名单中。`)
+  if (!table) throw new Error('表名无效。')
 
   const columns = Array.isArray(query.columns) && query.columns.length ? query.columns : ['*']
   const projection = columns.length === 1 && columns[0] === '*'

@@ -18,7 +18,7 @@ const DICTIONARY_TABLE = 'bas_t_dict'
 /** 订单时间线要借这张表翻译原因码，因此单独导出。 */
 export const DICTIONARY_VALUES_TABLE = 'bas_t_dict_values'
 
-/** 字典查询只读这两张表，必须全部在白名单内才会执行。 */
+/** 字典查询固定读取的两张只读表。 */
 export const DICTIONARY_TABLES = Object.freeze([DICTIONARY_TABLE, DICTIONARY_VALUES_TABLE])
 
 /** dict_id=3 的原因码（G 码）字典，订单操作流水 reason 字段的编码来源。 */
@@ -98,15 +98,6 @@ export function normalizeDictionaryParams(input = {}) {
 /** 未提供任何筛选条件时走"字典目录"模式，用于先看清有哪些字典。 */
 export function isDictionaryDiscovery(params) {
   return params.dict_id === null && params.dict_value === null && params.keyword === null
-}
-
-/** 两张表必须都在白名单内；缺哪张就报哪张，便于直接照做。 */
-export function assertDictionaryTablesAllowed(config = {}) {
-  const { allowedTables } = resolveSecurityPolicy(config)
-  const missing = DICTIONARY_TABLES.filter(table => !allowedTables.includes(table))
-  if (missing.length) {
-    throw new Error(`字典查询需要先把以下数据表加入业务表白名单：${missing.join('、')}。请在数据库设置页添加后重试。`)
-  }
 }
 
 const CATALOG_SQL = `
@@ -205,7 +196,6 @@ export async function runDictionaryLookup(config, input = {}, {
   now = () => new Date(),
 } = {}) {
   const params = normalizeDictionaryParams(input)
-  assertDictionaryTablesAllowed(config)
   const discovery = isDictionaryDiscovery(params)
 
   const payload = await runDatabaseOperation(

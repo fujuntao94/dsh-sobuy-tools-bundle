@@ -26,10 +26,9 @@ Desktop 中会显示飞书和数据库两个设置项。数据库设置页监听
 
 数据库组件还提供 `database_soldout_attribution` Tool 与 `database-soldout-attribution` Skill：
 默认按近 N 天（上限 45 天）聚合当前待处理的缺货 SKU 与仓库；可切换历史复盘口径，并对照当前库存、库存明细、预警和关联货柜输出主因、并发因素与建议动作。
-SQL 为代码内固定模板，模型只能选聚合维度与填参数，不接受 SQL 字符串；
-执行前要求 `oms_t_orders_tracking`、`oms_t_inventory`、`oms_t_inventory_detail`、
-`early_warn_inventory_info`、`bas_t_container`、`bas_t_container_sku` 全部在业务表白名单内。
-另需将 `bas_t_work_stock` 加入白名单，以返回未完成上下架任务与责任人。
+SQL 为代码内固定模板，模型只能选聚合维度与填参数，不接受 SQL 字符串；固定读取
+`oms_t_orders_tracking`、`oms_t_inventory`、`oms_t_inventory_detail`、`early_warn_inventory_info`、
+`bas_t_container`、`bas_t_container_sku` 和 `bas_t_work_stock`，不要求手工配置业务表白名单。
 
 `database_soldout_snapshot_capture` 会从上述只读查询采集当前待处理缺货队列并保存到插件私有目录；
 `database_soldout_snapshot_compare` 比较最近两份快照。两者都不会向 OMS 写数据。
@@ -40,8 +39,7 @@ SQL 为代码内固定模板，模型只能选聚合维度与填参数，不接�
   含订单原因码 G 码。注意 `reason` 是混合编码，只有 G 码有字典，实测翻译命中率约 50.9%。
 - `database_order_timeline`（Skill `database-order-timeline`）：按订单号返回单笔订单的完整操作
   流水（改单轨迹），含操作类型、原因码及翻译、说明与操作人。原因码只在「拦截」类操作上才有值；
-  人工填写的 `action_explain` 不返回，`information` 截断到 300 字符。依赖
-  `oms_t_order_action` 与 `bas_t_dict_values` 两张表在白名单内。
+  人工填写的 `action_explain` 不返回，`information` 截断到 300 字符。
 
 ## 工具 schema 必须落在宿主支持的子集内
 

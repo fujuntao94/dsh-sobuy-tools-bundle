@@ -1,7 +1,7 @@
 export function createSecurityCheckTool({ securityService }) {
   return {
     name: 'database_security_check',
-    description: '检查当前数据库账号是否可确认只读，并返回表白名单、行数上限、超时、敏感字段屏蔽和日志脱敏策略。',
+    description: '检查当前数据库账号是否可确认只读，并返回行数上限、超时、敏感字段屏蔽和日志脱敏策略。',
     parameters: { type: 'object', additionalProperties: false, properties: {} },
     output: {
       schema: {
@@ -23,7 +23,6 @@ export function createSecurityCheckTool({ securityService }) {
           policy: {
             type: 'object', additionalProperties: true,
             properties: {
-              allowedTables: { type: 'array', items: { type: 'string' } },
               maxRows: { type: 'number' },
               queryTimeoutMs: { type: 'number' },
               sensitiveFields: { type: 'array', items: { type: 'string' } },
@@ -40,7 +39,7 @@ export function createSecurityCheckTool({ securityService }) {
         text: [
           `账号状态：${value.account.status}`,
           value.account.reason,
-          `表白名单：${value.policy.allowedTables.length ? value.policy.allowedTables.join('、') : '未配置（业务表查询默认禁止）'}`,
+          '业务表访问：不设白名单；仅现有只读工具的固定查询或结构化 SELECT 可访问。',
           `最大返回行数：${value.policy.maxRows}`,
           `查询超时：${value.policy.queryTimeoutMs}ms`,
           '任意 SQL：禁止；多语句：禁止；写入语句：禁止；查询日志：脱敏。',

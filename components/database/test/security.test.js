@@ -10,30 +10,29 @@ import { registerSecurityCheckSkill } from '../src/runtime/skills/security-check
 
 const CONFIG = {
   host: 'db.internal', port: 3306, database: 'orders', username: 'readonly', password: 'secret', ssl: false,
-  allowedTables: ['orders'], maxRows: 50, queryTimeoutMs: 1000,
+  maxRows: 50, queryTimeoutMs: 1000,
   sensitiveFields: ['password', 'token', 'mobile'],
 }
 
-test('安全策略限制白名单、最大行数、超时和敏感字段规则', () => {
+test('安全策略限制最大行数、超时和敏感字段规则，不设业务表白名单', () => {
   assert.deepEqual(normalizeSecurityPolicy({
-    allowedTables: 'orders\norder_items,orders', maxRows: '20', queryTimeoutMs: '2500', sensitiveFields: 'password\ntoken',
+    maxRows: '20', queryTimeoutMs: '2500', sensitiveFields: 'password\ntoken',
   }), {
-    allowedTables: ['orders', 'order_items'], maxRows: 20, queryTimeoutMs: 2500, sensitiveFields: ['password', 'token'],
+    maxRows: 20, queryTimeoutMs: 2500, sensitiveFields: ['password', 'token'],
   })
   assert.throws(() => normalizeSecurityPolicy({ maxRows: '5001', queryTimeoutMs: '5000' }), /最大返回行数/)
   assert.throws(() => normalizeSecurityPolicy({ maxRows: '10', queryTimeoutMs: '100' }), /查询超时/)
-  assert.throws(() => normalizeSecurityPolicy({ allowedTables: `orders\n${'x'.repeat(65)}` }), /白名单包含无效名称/)
   assert.equal(resolveSecurityPolicy({ maxRows: 99999 }).maxRows, 500)
 })
 
-test('结构化查询只生成单条 SELECT，并强制白名单、参数化和最大行数', () => {
+test('结构化查询允许任意合法表名，但仍只生成参数化单条 SELECT 并限制最大行数', () => {
   const built = buildSafeSelect({
     table: 'orders', columns: ['id', 'status'], conditions: { status: 'paid' }, limit: 500,
   }, CONFIG)
   assert.equal(built.sql, 'SELECT `id`, `status` FROM `orders` WHERE `status` = ? LIMIT ?')
   assert.deepEqual(built.values, ['paid', 50])
   assert.equal(built.meta.appliedLimit, 50)
-  assert.throws(() => buildSafeSelect({ table: 'users' }, CONFIG), /不在白名单/)
+  assert.equal(buildSafeSelect({ table: 'users' }, CONFIG).sql, 'SELECT * FROM `users` LIMIT ?')
   assert.throws(() => buildSafeSelect({ table: 'orders', sql: 'DELETE FROM orders' }, CONFIG), /不支持参数：sql/)
   assert.doesNotMatch(built.sql, /;|UPDATE|DELETE|INSERT/i)
 })
@@ -121,7 +120,7 @@ test('安全检查 Tool 与 Skill 只暴露脱敏安全状态', async () => {
   const securityService = {
     checkReadonly: async () => ({ status: 'read_only', readOnlyVerified: true, writePrivileges: [], reviewPrivileges: [], reason: '当前授权清单仅包含只读权限。' }),
     policy: async () => ({
-      allowedTables: ['orders'], maxRows: 50, queryTimeoutMs: 1000, sensitiveFields: ['password'],
+      maxRows: 50, queryTimeoutMs: 1000, sensitiveFields: ['password'],
       arbitrarySqlAllowed: false, multipleStatementsAllowed: false, writeStatementsAllowed: false, queryLogsRedacted: true,
     }),
   }

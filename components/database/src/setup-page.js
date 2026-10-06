@@ -23,7 +23,6 @@ export function normalizeDatabaseConfig(input, previous) {
     password: submittedPassword || previous?.password || '',
     ssl: input.ssl === true || input.ssl === 'true' || input.ssl === 'on',
     ...normalizeSecurityPolicy({
-      allowedTables: input.allowedTables,
       maxRows: input.maxRows,
       queryTimeoutMs: input.queryTimeoutMs,
       sensitiveFields: input.sensitiveFields,
@@ -88,7 +87,6 @@ export function createDatabaseSetupServer(options) {
           username: form.get('username'),
           password: form.get('password'),
           ssl: form.get('ssl'),
-          allowedTables: form.get('allowed_tables'),
           maxRows: form.get('max_rows'),
           queryTimeoutMs: form.get('query_timeout_ms'),
           sensitiveFields: form.get('sensitive_fields'),

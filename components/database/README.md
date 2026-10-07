@@ -17,10 +17,13 @@
 - Tool：`database_describe_table`，只查询订单数据库的 `information_schema.columns`，返回指定表的字段名、类型、是否可空、键标记与字段备注。
 - Tool：`database_soldout_attribution`，全部当前待处理缺货归因或近 N 天历史复盘，见下方专节。
 - Tool：`database_inventory_shortage_forecast`，按当前月预测销量和当前库存发现尚未缺货但即将断货的 SKU×仓库，见下方专节。
+- Tool：`database_profit_analysis`，按付款月分析实际销售、利润、退款与已沉淀费用分摊，不接受 SQL 或返回客户资料。
 - Tool：`database_dictionary_lookup`，字典目录 / 字典取值 / 编码翻译，含订单原因码（G 码），见下方专节。
 - Tool：`database_order_timeline`，按订单号返回单笔订单的完整操作流水，见下方专节。
 - Skill：`database-table-catalog`，回答表数量，并只列出表名和用途。
 - Skill：`database-soldout-attribution`，解释缺货归因的口径、原因枚举与使用边界。
+- Skill：`database-inventory-shortage-forecast`，解释预测性缺货预警的参数、结果口径与承诺边界。
+- Skill：`database-profit-analysis`，解释利润指标口径、付款日期时间锚点与费用分摊边界。
 - Skill：`database-dictionary-lookup`，解释字典目录，以及原因码是混合编码这一事实。
 - Skill：`database-order-timeline`，解释流水字段含义、原因码只属于「拦截」操作，以及不返回客户资料。
 
@@ -99,7 +102,7 @@ SKU 维度结果按 P0–P3 待办优先级排序，并附带本次返回范围�
 | --- | --- | --- |
 | `coverage_days` | 1–90，默认 14 | 只返回当前库存覆盖天数低于该阈值的 SKU×仓库 |
 | `warehouse_id` | 可选整数 | 只预警指定仓库 |
-| `top_n` | 1–500，默认 20 | 返回条数上限 |
+| `top_n` | 1–1000，默认 500 | 返回条数上限 |
 
 固定读取 `report_t_predict_sku` 当前自然月预测销量与责任人、`oms_t_inventory` 当前库存。MySQL 内部先按 SKU×仓库聚合预测和库存，再按覆盖天数过滤；返回月预测量、预测日均量、本仓可用/占用、库存更新时间、覆盖天数、达到阈值仍需补足的数量、其他仓候选库存、预测责任人和建议动作。
 

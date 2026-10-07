@@ -5,11 +5,16 @@ import { registerListTablesTool } from './src/runtime/tools/list-tables-tool.js'
 import { registerDescribeTableTool } from './src/runtime/tools/describe-table-tool.js'
 import { registerSoldoutAttributionTool } from './src/runtime/tools/soldout-attribution-tool.js'
 import { registerInventoryShortageForecastTool } from './src/runtime/tools/inventory-shortage-forecast-tool.js'
+import { registerProfitAnalysisTool } from './src/runtime/tools/profit-analysis-tool.js'
+import { registerProfitPlanTools } from './src/runtime/tools/profit-plan-analysis-tool.js'
+import { registerProfitInsightTools } from './src/runtime/tools/profit-insights-tool.js'
 import { registerSoldoutSnapshotTools } from './src/runtime/tools/soldout-snapshot-tool.js'
 import { registerDictionaryTool } from './src/runtime/tools/dictionary-tool.js'
 import { registerOrderTimelineTool } from './src/runtime/tools/order-timeline-tool.js'
 import { registerTableCatalogSkill } from './src/runtime/skills/table-catalog-skill.js'
 import { registerSoldoutAttributionSkill } from './src/runtime/skills/soldout-attribution-skill.js'
+import { registerInventoryShortageForecastSkill } from './src/runtime/skills/inventory-shortage-forecast-skill.js'
+import { registerProfitAnalysisSkill } from './src/runtime/skills/profit-analysis-skill.js'
 import { registerDictionarySkill } from './src/runtime/skills/dictionary-skill.js'
 import { registerOrderTimelineSkill } from './src/runtime/skills/order-timeline-skill.js'
 import { createQueryAuditLogger } from './src/security/query-audit.js'
@@ -56,12 +61,17 @@ export function apply(ctx, config = {}) {
   registerDescribeTableTool(ctx, { ...options, auditLogger })
   registerSoldoutAttributionTool(ctx, { ...options, auditLogger })
   registerInventoryShortageForecastTool(ctx, { ...options, auditLogger })
+  registerProfitAnalysisTool(ctx, { ...options, auditLogger })
+  registerProfitPlanTools(ctx, { ...options, auditLogger })
+  registerProfitInsightTools(ctx, { ...options, auditLogger })
   registerSoldoutSnapshotTools(ctx, { ...options, auditLogger })
   registerDictionaryTool(ctx, { ...options, auditLogger })
   registerOrderTimelineTool(ctx, { ...options, auditLogger })
   registerSecurityCheckTool(ctx, { securityService })
   registerTableCatalogSkill(ctx)
   registerSoldoutAttributionSkill(ctx)
+  registerInventoryShortageForecastSkill(ctx)
+  registerProfitAnalysisSkill(ctx)
   registerDictionarySkill(ctx)
   registerOrderTimelineSkill(ctx)
   registerSecurityCheckSkill(ctx)

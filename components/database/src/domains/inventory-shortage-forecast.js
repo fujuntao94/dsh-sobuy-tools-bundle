@@ -15,8 +15,8 @@ const PREDICT_TABLE = 'report_t_predict_sku'
 const INVENTORY_TABLE = 'oms_t_inventory'
 
 export const INVENTORY_SHORTAGE_FORECAST_TABLES = Object.freeze([PREDICT_TABLE, INVENTORY_TABLE])
-export const DEFAULT_FORECAST_TOP_N = 20
-export const MAX_FORECAST_TOP_N = 500
+export const DEFAULT_FORECAST_TOP_N = 500
+export const MAX_FORECAST_TOP_N = 1000
 export const DEFAULT_COVERAGE_DAYS = 14
 export const MAX_COVERAGE_DAYS = 90
 
@@ -64,7 +64,9 @@ export function normalizeInventoryShortageForecastParams(input = {}) {
  * 固定聚合查询的执行层次：
  * 1. forecast：将同月、同 SKU×仓库的预测行合并，得到月预测量与预测责任人；
  * 2. local_stock：将库存快照合并到同一维度，避免把多条库存行放大预测数量；
- * 3. 外层：计算库存覆盖天数，并只返回低于调用方阈值的风险分组。
+ * 3. 先按库存覆盖天数筛选、排序并截断风险分组；
+ * 4. 外层才为最终返回的分组补充其他仓候选库存，避免对未返回的风险分组
+ *    重复扫描库存表。
  *
  * `other_warehouse_available` 和 `transfer_candidates` 只表达“候选可调拨库存”，
  * 不等同于已创建或一定能按时完成的调拨任务。
@@ -75,63 +77,77 @@ export function buildInventoryShortageForecastQuery(input = {}) {
   const warehouseFilter = hasWarehouseFilter ? ' AND warehouse_id = ?' : ''
   const sql = `
 SELECT
-  forecast.sku,
-  forecast.warehouse_id,
-  COALESCE(local_stock.warehouse_name, '') AS warehouse_name,
-  DATE_FORMAT(CURDATE(), '%Y-%m') AS forecast_month,
-  forecast.monthly_forecast_qty,
-  GREATEST(1, CEIL(forecast.monthly_forecast_qty / 30)) AS forecast_daily_qty,
-  CAST(COALESCE(local_stock.local_available, 0) AS SIGNED) AS local_available,
-  CAST(COALESCE(local_stock.local_usednum, 0) AS SIGNED) AS local_usednum,
-  COALESCE(local_stock.local_stock_status, 9) AS local_stock_status,
-  DATE_FORMAT(local_stock.local_stock_updated_at, '%Y-%m-%d %H:%i:%s') AS local_stock_updated_at,
-  COALESCE(forecast.forecast_owners, '') AS forecast_owners,
+  risk.sku,
+  risk.warehouse_id,
+  risk.warehouse_name,
+  risk.forecast_month,
+  risk.monthly_forecast_qty,
+  risk.forecast_daily_qty,
+  risk.local_available,
+  risk.local_usednum,
+  risk.local_stock_status,
+  risk.local_stock_updated_at,
+  risk.forecast_owners,
   CAST(COALESCE((
     SELECT SUM(other_inventory.available)
     FROM ${INVENTORY_TABLE} other_inventory
-    WHERE other_inventory.p_sku = forecast.sku
-      AND other_inventory.wsid <> forecast.warehouse_id
+    WHERE other_inventory.p_sku = risk.sku
+      AND other_inventory.wsid <> risk.warehouse_id
       AND other_inventory.available > 0
   ), 0) AS SIGNED) AS other_warehouse_available,
   COALESCE((
     SELECT LEFT(GROUP_CONCAT(CONCAT(other_inventory.wsname, '(', other_inventory.wsid, '):', other_inventory.available)
       ORDER BY other_inventory.available DESC SEPARATOR '、'), 500)
     FROM ${INVENTORY_TABLE} other_inventory
-    WHERE other_inventory.p_sku = forecast.sku
-      AND other_inventory.wsid <> forecast.warehouse_id
+    WHERE other_inventory.p_sku = risk.sku
+      AND other_inventory.wsid <> risk.warehouse_id
       AND other_inventory.available > 0
   ), '') AS transfer_candidates
 FROM (
   SELECT
-    sku,
-    warehouse_id,
-    CAST(SUM(COALESCE(num, 0)) AS SIGNED) AS monthly_forecast_qty,
-    LEFT(GROUP_CONCAT(DISTINCT NULLIF(duty_user_name, '') ORDER BY duty_user_name SEPARATOR '、'), 300) AS forecast_owners
-  FROM ${PREDICT_TABLE}
-  WHERE COALESCE(is_delete, 0) = 0
-    AND CAST(predict_year AS UNSIGNED) = YEAR(CURDATE())
-    AND CAST(predict_month AS UNSIGNED) = MONTH(CURDATE())${warehouseFilter}
-  GROUP BY sku, warehouse_id
-) forecast
-LEFT JOIN (
-  SELECT
-    p_sku,
-    wsid,
-    MAX(NULLIF(wsname, '')) AS warehouse_name,
-    CAST(SUM(COALESCE(available, 0)) AS SIGNED) AS local_available,
-    CAST(SUM(COALESCE(usednum, 0)) AS SIGNED) AS local_usednum,
-    MAX(status) AS local_stock_status,
-    MAX(update_time) AS local_stock_updated_at
-  FROM ${INVENTORY_TABLE}
-  GROUP BY p_sku, wsid
-) local_stock ON local_stock.p_sku = forecast.sku AND local_stock.wsid = forecast.warehouse_id
--- 没有预测需求的 SKU 不属于“预测性缺货”，避免 0 除或把零需求误报为风险。
-WHERE forecast.monthly_forecast_qty > 0
-  AND FLOOR(COALESCE(local_stock.local_available, 0) / NULLIF(GREATEST(1, CEIL(forecast.monthly_forecast_qty / 30)), 0)) < ?
-ORDER BY
-  FLOOR(COALESCE(local_stock.local_available, 0) / NULLIF(GREATEST(1, CEIL(forecast.monthly_forecast_qty / 30)), 0)) ASC,
-  forecast.monthly_forecast_qty DESC
-LIMIT ?`
+    forecast.sku,
+    forecast.warehouse_id,
+    COALESCE(local_stock.warehouse_name, '') AS warehouse_name,
+    DATE_FORMAT(CURDATE(), '%Y-%m') AS forecast_month,
+    forecast.monthly_forecast_qty,
+    GREATEST(1, CEIL(forecast.monthly_forecast_qty / 30)) AS forecast_daily_qty,
+    CAST(COALESCE(local_stock.local_available, 0) AS SIGNED) AS local_available,
+    CAST(COALESCE(local_stock.local_usednum, 0) AS SIGNED) AS local_usednum,
+    COALESCE(local_stock.local_stock_status, 9) AS local_stock_status,
+    DATE_FORMAT(local_stock.local_stock_updated_at, '%Y-%m-%d %H:%i:%s') AS local_stock_updated_at,
+    COALESCE(forecast.forecast_owners, '') AS forecast_owners
+  FROM (
+    SELECT
+      sku,
+      warehouse_id,
+      CAST(SUM(COALESCE(num, 0)) AS SIGNED) AS monthly_forecast_qty,
+      LEFT(GROUP_CONCAT(DISTINCT NULLIF(duty_user_name, '') ORDER BY duty_user_name SEPARATOR '、'), 300) AS forecast_owners
+    FROM ${PREDICT_TABLE}
+    WHERE COALESCE(is_delete, 0) = 0
+      AND CAST(predict_year AS UNSIGNED) = YEAR(CURDATE())
+      AND CAST(predict_month AS UNSIGNED) = MONTH(CURDATE())${warehouseFilter}
+    GROUP BY sku, warehouse_id
+  ) forecast
+  LEFT JOIN (
+    SELECT
+      p_sku,
+      wsid,
+      MAX(NULLIF(wsname, '')) AS warehouse_name,
+      CAST(SUM(COALESCE(available, 0)) AS SIGNED) AS local_available,
+      CAST(SUM(COALESCE(usednum, 0)) AS SIGNED) AS local_usednum,
+      MAX(status) AS local_stock_status,
+      MAX(update_time) AS local_stock_updated_at
+    FROM ${INVENTORY_TABLE}
+    GROUP BY p_sku, wsid
+  ) local_stock ON local_stock.p_sku = forecast.sku AND local_stock.wsid = forecast.warehouse_id
+  -- 没有预测需求的 SKU 不属于“预测性缺货”，避免 0 除或把零需求误报为风险。
+  WHERE forecast.monthly_forecast_qty > 0
+    AND FLOOR(COALESCE(local_stock.local_available, 0) / NULLIF(GREATEST(1, CEIL(forecast.monthly_forecast_qty / 30)), 0)) < ?
+  ORDER BY
+    FLOOR(COALESCE(local_stock.local_available, 0) / NULLIF(GREATEST(1, CEIL(forecast.monthly_forecast_qty / 30)), 0)) ASC,
+    forecast.monthly_forecast_qty DESC
+  LIMIT ?
+) risk`
   return {
     sql: sql.trim(),
     values: [...(hasWarehouseFilter ? [params.warehouse_id] : []), params.coverage_days, params.top_n],

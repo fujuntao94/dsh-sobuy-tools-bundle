@@ -3,7 +3,8 @@
  *
  * 与 safe-select.js 的区别：这里的 SQL 是**代码内固定**的聚合模板，模型只能选择
  * 模板和填参数，永远接触不到 SQL 字符串或表名，因此不需要开放任意 SQL。
- * 三个数据源、聚合维度、时间锚点全部写死在文件里。
+ * 数据源、聚合维度、时间锚点全部写死在文件里。预测性缺货由
+ * inventory-shortage-forecast.js 单独处理，避免把“已缺货归因”和“未来风险”混在一次查询中。
  *
  * 时间锚点用 `order_time`（下单时间）而不是 `soldout_time`：一来 soldout_time
  * 上没有索引（表 273 万行，全表扫描会撞超时），二来 `1A|06`、`1A|04` 这类缺货
@@ -14,6 +15,8 @@ import { formatLocalDateTime } from './format.js'
 import { resolveSecurityPolicy } from '../security/policy.js'
 import { maskSensitiveRows } from '../security/sensitive-fields.js'
 
+// 订单缺货事实、当前库存/占用、预警、货柜和上架任务分别提供不同证据；
+// 它们都不会直接给出“缺货原因”，原因仍由下方 classifyAttribution 组合推断。
 const TRACKING_TABLE = 'oms_t_orders_tracking'
 const INVENTORY_TABLE = 'oms_t_inventory'
 const INVENTORY_DETAIL_TABLE = 'oms_t_inventory_detail'
@@ -405,6 +408,8 @@ function normalizeBySkuRow(row) {
   }
   return {
     ...common,
+    // 扁平字段用于兼容旧调用；evidence 为新调用方提供按来源分组的完整证据，
+    // 防止消费者只读 attribution 而忽略库存快照、货柜样本等时效边界。
     evidence: {
       shortage: {
         oldestShortageTime: common.oldestShortageTime,
@@ -587,6 +592,8 @@ export function buildAttributionActionSummary(rows = [], groupBy = 'sku', now = 
   if (groupBy !== 'sku') {
     return { scope: 'returned_rows', byReason: [], byWarehouse: [], byOwner: [], byImpact: [], byTrend: [] }
   }
+  // priority 仍由主因决定；影响等级和等待时长作为同一主因下的次级排序，
+  // 不用价格相加，以避免跨币种订单产生不可解释的优先级。
   const queue = rows.map(row => {
     const waitHours = ageHours(row.oldestShortageTime, now)
     const impactResult = impact(row, waitHours)

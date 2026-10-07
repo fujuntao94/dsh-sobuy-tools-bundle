@@ -1,6 +1,6 @@
 {
   "name": "dsh-sobuy-tools-bundle",
-  "version": "0.1.36",
+  "version": "0.1.37",
   "description": "Sobuy DSH 工具组件包：飞书工具与订单数据库。",
   "icon": "./icon.svg",
   "type": "module",

@@ -17,6 +17,8 @@ const NUMBER = { type: 'number' }
 const STRING = { type: 'string' }
 
 function rowLines(row, index) {
+  // 文本只是结构化 rows 的人读摘要。需要程序化消费时优先使用 evidence，
+  // 因为它保留了库存、预警、货柜和上架任务的原始聚合证据。
   const scope = row.sku
     ? `${row.sku} @ ${row.warehouseName}(${row.warehouseId})`
     : `${row.warehouseName}(${row.warehouseId})`
@@ -98,6 +100,7 @@ export function createSoldoutAttributionTool({
           generatedAt: STRING,
           groups: { type: 'number', description: '本次返回的分组条数。' },
           actionSummary: {
+            // 汇总范围始终是本次返回的 Top N，而不是全库总计；避免把截断结果误读为全量 KPI。
             type: 'object', additionalProperties: false,
             required: ['scope', 'byReason', 'byWarehouse', 'byOwner', 'byImpact', 'byTrend'],
             properties: {
@@ -236,6 +239,7 @@ export function createSoldoutAttributionTool({
       }
       try {
         const result = await attribution(config, args, { signal: exec?.signal })
+        // 固定归因查询只记录操作元信息；不写入订单数据，也不把行级证据写入审计日志。
         meta = { windowDays: result.windowDays, groupBy: result.groupBy, appliedLimit: result.groups }
         auditLogger?.record({
           operation: 'soldout_attribution', status: 'success', table: SOLD_OUT_ATTRIBUTION_TABLES[0],

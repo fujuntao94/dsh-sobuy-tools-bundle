@@ -9,6 +9,8 @@ import { formatLocalDateTime } from './format.js'
 import { resolveSecurityPolicy } from '../security/policy.js'
 import { maskSensitiveRows } from '../security/sensitive-fields.js'
 
+// 预测表给出“需求侧”的本月销量预估；库存表给出“供给侧”的实时快照。
+// 不读取订单表，避免把“未来风险预警”误做成“已发生缺货复盘”。
 const PREDICT_TABLE = 'report_t_predict_sku'
 const INVENTORY_TABLE = 'oms_t_inventory'
 
@@ -37,6 +39,10 @@ function positiveInteger(value, label, { minimum, maximum }) {
   return number
 }
 
+/**
+ * 这里只允许控制筛选阈值、仓库和返回量。表名、月份和 SQL 均固定，
+ * 既保证只读边界，也避免模型传入任意查询条件扩大扫描范围。
+ */
 export function normalizeInventoryShortageForecastParams(input = {}) {
   if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('预测性缺货预警参数无效。')
   const unknown = Object.keys(input).filter(key => !ALLOWED_PARAMS.has(key))
@@ -54,7 +60,15 @@ export function normalizeInventoryShortageForecastParams(input = {}) {
   }
 }
 
-/** 固定聚合查询：MySQL 先按 SKU×仓库汇总预测和库存，再仅返回覆盖天数低于阈值的分组。 */
+/**
+ * 固定聚合查询的执行层次：
+ * 1. forecast：将同月、同 SKU×仓库的预测行合并，得到月预测量与预测责任人；
+ * 2. local_stock：将库存快照合并到同一维度，避免把多条库存行放大预测数量；
+ * 3. 外层：计算库存覆盖天数，并只返回低于调用方阈值的风险分组。
+ *
+ * `other_warehouse_available` 和 `transfer_candidates` 只表达“候选可调拨库存”，
+ * 不等同于已创建或一定能按时完成的调拨任务。
+ */
 export function buildInventoryShortageForecastQuery(input = {}) {
   const params = normalizeInventoryShortageForecastParams(input)
   const hasWarehouseFilter = params.warehouse_id !== null
@@ -111,6 +125,7 @@ LEFT JOIN (
   FROM ${INVENTORY_TABLE}
   GROUP BY p_sku, wsid
 ) local_stock ON local_stock.p_sku = forecast.sku AND local_stock.wsid = forecast.warehouse_id
+-- 没有预测需求的 SKU 不属于“预测性缺货”，避免 0 除或把零需求误报为风险。
 WHERE forecast.monthly_forecast_qty > 0
   AND FLOOR(COALESCE(local_stock.local_available, 0) / NULLIF(GREATEST(1, CEIL(forecast.monthly_forecast_qty / 30)), 0)) < ?
 ORDER BY
@@ -124,6 +139,10 @@ LIMIT ?`
   }
 }
 
+/**
+ * 风险标签只服务于待办排序；真正入选条件由 coverage_days 参数决定。
+ * 因此当用户把阈值设为 30 天时，覆盖 20 天的 SKU 仍会返回，但风险标签保持“中风险”。
+ */
 function riskFor(coverageDays) {
   if (coverageDays <= 0) return { level: 'critical', label: '即将断货', action: '立即核实可用库存、调拨与补货计划。' }
   if (coverageDays < 7) return { level: 'high', label: '高风险', action: '优先安排补货或调拨，并确认到货与上架时间。' }
@@ -136,6 +155,7 @@ export function normalizeInventoryShortageForecastRows(rows, coverageDays) {
     const monthlyForecastQty = toInt(row.monthly_forecast_qty)
     const forecastDailyQty = Math.max(1, toInt(row.forecast_daily_qty))
     const localAvailable = toInt(row.local_available)
+    // 负库存按 0 天覆盖处理，避免在展示层出现负天数而掩盖断货风险。
     const stockCoverDays = Math.floor(Math.max(0, localAvailable) / forecastDailyQty)
     const risk = riskFor(stockCoverDays)
     return {
@@ -151,6 +171,7 @@ export function normalizeInventoryShortageForecastRows(rows, coverageDays) {
       localStockUpdatedAt: toStringValue(row.local_stock_updated_at),
       stockCoverDays,
       coverageThresholdDays: coverageDays,
+      // 缺口是“达到用户要求覆盖天数还差多少”，不是采购建议量，也不扣除在途货柜。
       shortfallQty: Math.max(0, (coverageDays * forecastDailyQty) - localAvailable),
       otherWarehouseAvailable: toInt(row.other_warehouse_available),
       transferCandidates: toStringValue(row.transfer_candidates),
@@ -162,6 +183,7 @@ export function normalizeInventoryShortageForecastRows(rows, coverageDays) {
   })
 }
 
+/** 仅对已过滤出的风险分组做 Tool 端小规模汇总，不会处理订单明细。 */
 function summarize(rows, key, label) {
   const groups = new Map()
   for (const row of rows) {
@@ -187,6 +209,7 @@ export async function runInventoryShortageForecast(config, input = {}, {
     connection => connection.execute(built.sql, built.values),
     { createConnection, signal, timeoutMs: resolveSecurityPolicy(config).queryTimeoutMs },
   )
+  // 即便固定查询没有选择客户字段，仍统一走脱敏层，避免未来扩字段时绕过安全基线。
   const normalized = maskSensitiveRows(normalizeInventoryShortageForecastRows(rows, params.coverage_days), config)
   return {
     forecastMonth: formatLocalDateTime(now()).slice(0, 7),

@@ -12,6 +12,7 @@ import { errorKind } from "../../security/query-audit.js";
 const NUMBER = { type: "number" };
 const STRING = { type: "string" };
 
+// 与其它数据库 Tool 保持一致：只有完整连接配置才能执行，避免把驱动层错误暴露给模型。
 function hasDatabaseConfig(config) {
   return Boolean(
     config?.host &&
@@ -23,6 +24,8 @@ function hasDatabaseConfig(config) {
 }
 
 function rowLines(row, index) {
+  // 渲染只复述结构化结果；缺口、候选仓和责任人均来自固定查询，
+  // 但仍不能将候选调拨量或预测负责人表述为已确认的履约承诺/责任归属。
   return [
     `${index + 1}. ${row.sku} @ ${row.warehouseName}(${row.warehouseId}) [${row.riskLabel}]：预测月销量 ${row.monthlyForecastQty} 件，日均 ${row.forecastDailyQty} 件，当前可用 ${row.localAvailable}，覆盖约 ${row.stockCoverDays} 天。`,
     `   缺口：达到 ${row.coverageThresholdDays} 天覆盖仍差 ${row.shortfallQty} 件；其他仓可用 ${row.otherWarehouseAvailable}${row.transferCandidates ? `，候选仓：${row.transferCandidates}` : ""}。`,
@@ -47,6 +50,8 @@ export function createInventoryShortageForecastTool({
       type: "object",
       additionalProperties: false,
       properties: {
+        // 不提供月份和任意 SQL 条件：月份固定为数据库当前自然月，
+        // 这样不会让调用方扩大为跨月历史预测扫描。
         warehouse_id: {
           type: "integer",
           minimum: 1,
@@ -146,6 +151,8 @@ export function createInventoryShortageForecastTool({
             },
           },
           rows: {
+            // 这些字段全部经过 domain 层归一化，空值统一转为 0 或空字符串，
+            // 因而输出 schema 不需要联合类型，避免宿主激活阶段报错。
             type: "array",
             items: {
               type: "object",
@@ -233,6 +240,7 @@ export function createInventoryShortageForecastTool({
         );
       try {
         const result = await forecast(config, args, { signal: exec?.signal });
+        // 审计只保留阈值、数量和耗时；不记录 SQL、SKU、责任人或结果明细。
         meta = {
           coverageDays: result.coverageThresholdDays,
           appliedLimit: result.groups,

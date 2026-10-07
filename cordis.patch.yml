@@ -11,3 +11,5 @@
         authorizationTimeoutMs: 300000
     - id: sobuy-database-tools
       name: sobuy-database-tools
+    - id: sobuy-customer-profile-tools
+      name: sobuy-customer-profile-tools

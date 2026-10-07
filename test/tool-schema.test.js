@@ -39,6 +39,7 @@ async function collectToolDefinitions() {
     ['../components/database/src/runtime/tools/dictionary-tool.js', 'registerDictionaryTool', {}],
     ['../components/database/src/runtime/tools/order-timeline-tool.js', 'registerOrderTimelineTool', {}],
     ['../components/database/src/runtime/tools/security-check-tool.js', 'registerSecurityCheckTool', { securityService: {} }],
+    ['../components/customer-profile/src/runtime/tools/customer-profile-tool.js', 'registerCustomerProfileTool', {}],
     ['../components/feishu/src/runtime/tools/user-info-tool.js', 'registerUserInfoTool', {}],
     ['../components/feishu/src/runtime/tools/department-tool.js', 'registerDepartmentTool', {}],
     ['../components/feishu/src/runtime/tools/leave-balance-tool.js', 'registerLeaveBalanceTool', {}],
@@ -57,8 +58,8 @@ async function collectToolDefinitions() {
 const definitions = await collectToolDefinitions()
 const merged = new Map(definitions.map(definition => [definition.name, definition]))
 
-test('两个组件的工具都被注册到，且没有重名', () => {
-  assert.equal(definitions.length, 13)
+test('三个组件的工具都被注册到，且没有重名', () => {
+  assert.equal(definitions.length, 14)
   assert.equal(merged.size, definitions.length)
 })
 

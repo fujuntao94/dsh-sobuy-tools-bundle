@@ -96,6 +96,7 @@ const targets = [
   ['components/database/src/runtime/tools/dictionary-tool.js', 'registerDictionaryTool', {}],
   ['components/database/src/runtime/tools/order-timeline-tool.js', 'registerOrderTimelineTool', {}],
   ['components/database/src/runtime/tools/security-check-tool.js', 'registerSecurityCheckTool', { securityService: {} }],
+  ['components/customer-profile/src/runtime/tools/customer-profile-tool.js', 'registerCustomerProfileTool', {}],
   ['components/feishu/src/runtime/tools/user-info-tool.js', 'registerUserInfoTool', {}],
   ['components/feishu/src/runtime/tools/department-tool.js', 'registerDepartmentTool', {}],
   ['components/feishu/src/runtime/tools/leave-balance-tool.js', 'registerLeaveBalanceTool', {}],
